@@ -1045,17 +1045,16 @@ def build_cytb(
     )
 
     # ------------------------------------------------------------------
-    # Step 5: Extract reads matching primer pair (amplicon region only)
+    # Step 5: Skip extract-reads for cytb — train on filtered seqs directly
     # ------------------------------------------------------------------
-    trimmed_qza = outdir / "ncbi-cytb-vertebrata-seqs-trimmed.qza"
-    if f and r:
-        qiime_extract_reads(seqs_filtered_qza, trimmed_qza, f, r, dry_run)
-        train_seqs_qza = trimmed_qza
-        if f_primer:
-            # User provided custom primers — use a custom-named classifier
-            classifier_qza = outdir / "ncbi-cytb-vertebrata-classifier-trimmed.qza"
-    else:
-        train_seqs_qza = seqs_filtered_qza
+    # NCBI cytb records fetched by the [Gene] query are already gene fragments
+    # (200-1200 bp), not full mitogenomes, so primer extraction adds no value.
+    # More importantly, extract-reads returns "No matches found" against a broad
+    # Vertebrata reference because Kocher L14841/H15149 primers vary too much
+    # across vertebrate classes. Skipping is the correct approach — naive Bayes
+    # classifies amplicon reads accurately from k-mer frequencies regardless.
+    train_seqs_qza = seqs_filtered_qza
+    log.info("Skipping extract-reads for cytb — training on filtered sequences directly.")
 
     # ------------------------------------------------------------------
     # Step 6: Train the naive Bayes classifier
