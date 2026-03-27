@@ -1,0 +1,10 @@
+*.qza
+*.qzv
+*.biom
+*.fastq
+*.fastq.gz
+*.log
+__pycache__/
+.DS_Store
+results/
+logs/
