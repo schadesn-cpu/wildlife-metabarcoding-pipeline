@@ -22,8 +22,16 @@ Usage:
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+log = logging.getLogger(__name__)
 
 
 def month_to_season(month: int) -> str:
@@ -39,17 +47,45 @@ def month_to_season(month: int) -> str:
 
 
 def parse_date(date_str: str):
-    """Parse M/D/YY or M/D/YYYY. Returns month int or None."""
+    """
+    Parse M/D/YY or M/D/YYYY date string and return the month as an integer.
+
+    Returns None for empty strings (expected — sample has no collection date).
+    Raises ValueError for non-empty strings that don't match the expected
+    format, so the caller can log which sample had the bad date and why.
+
+    Args:
+        date_str: Raw date string from the metadata TSV cell.
+
+    Returns:
+        Integer month (1–12), or None if date_str is empty.
+
+    Raises:
+        ValueError: If date_str is non-empty but cannot be parsed as M/D/YY[YY].
+    """
     date_str = date_str.strip()
+
+    # Empty string is the expected case for samples with no collection date.
+    # Return None quietly — the caller will assign an empty Season value.
     if not date_str:
         return None
+
+    # Expected format is M/D/YY or M/D/YYYY. Split on "/" and parse the month
+    # (first field). Raise ValueError if the format doesn't match so the caller
+    # can log which sample caused the problem.
+    parts = date_str.split("/")
+    if len(parts) < 2:
+        raise ValueError(
+            f"Expected M/D/YY format but got '{date_str}' "
+            f"(no '/' separator found)"
+        )
     try:
-        parts = date_str.split("/")
-        if len(parts) >= 1:
-            return int(parts[0])
-    except (ValueError, IndexError):
-        pass
-    return None
+        return int(parts[0])
+    except ValueError:
+        raise ValueError(
+            f"Could not parse month from '{date_str}' "
+            f"(first field '{parts[0]}' is not an integer)"
+        )
 
 
 def main():
@@ -65,7 +101,7 @@ def main():
 
     lines = in_path.read_text(encoding="utf-8").splitlines()
     if not lines:
-        print("[ERROR] Empty file.", file=sys.stderr)
+        log.error("Empty file: %s", in_path)
         sys.exit(1)
 
     # Parse header — handle #q2:types row if present
@@ -76,13 +112,15 @@ def main():
     try:
         date_idx = headers.index(args.date_col)
     except ValueError:
-        print(f"[ERROR] Column '{args.date_col}' not found in header.", file=sys.stderr)
-        print(f"  Available columns: {headers}", file=sys.stderr)
+        log.error(
+            "Column '%s' not found in header. Available columns: %s",
+            args.date_col, headers,
+        )
         sys.exit(1)
 
     # Check if season column already exists
     if args.season_col in headers:
-        print(f"[WARN] Column '{args.season_col}' already exists — it will be overwritten.")
+        log.warning("Column '%s' already exists — it will be overwritten.", args.season_col)
         season_idx = headers.index(args.season_col)
         replace_mode = True
     else:
@@ -114,8 +152,17 @@ def main():
             continue
 
         # Data rows
+        # cols[0] is the sample-id — include it in any warnings so it's clear
+        # which sample had a date that could not be parsed.
         date_val = cols[date_idx].strip() if date_idx < len(cols) else ""
-        month = parse_date(date_val)
+        try:
+            month = parse_date(date_val)
+        except ValueError as e:
+            log.warning(
+                "Row %d (sample '%s'): %s — assigning empty Season.",
+                i, cols[0], e,
+            )
+            month = None
 
         if month is not None:
             season = month_to_season(month)

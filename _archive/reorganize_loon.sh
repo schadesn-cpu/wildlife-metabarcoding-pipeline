@@ -3,55 +3,23 @@
 # reorganize_loon.sh
 # Reorganizes loon_project/results/ into a clean rarefied/unrarefied structure.
 #
-# BEFORE RUNNING: set the base results directory with --base, or edit the
-# DEFAULT_BASE variable below to match your project path.
-#
 # Usage:
-#   bash reorganize_loon.sh --base /path/to/loon_project/results --dry-run
-#   bash reorganize_loon.sh --base /path/to/loon_project/results
-#
-#   # If DEFAULT_BASE is set correctly below, --base can be omitted:
-#   bash reorganize_loon.sh --dry-run
-#   bash reorganize_loon.sh
+#   bash reorganize_loon.sh --dry-run    # Preview all changes, nothing is touched
+#   bash reorganize_loon.sh              # Actually run the changes
 # =============================================================================
 
 set -euo pipefail
 
-# ── Configuration ─────────────────────────────────────────────────────────────
-# Edit DEFAULT_BASE to match your project's results directory, or pass
-# --base /your/path at the command line to override without editing this file.
-DEFAULT_BASE=""   # e.g. "/home/users/you/meedlab/loon_project/results"
-
+# ── Config ────────────────────────────────────────────────────────────────────
+BASE="/home/users/sne24/meedlab/loon_project/results"
 DRY_RUN=false
-BASE=""
 
 # Parse flags
 for arg in "$@"; do
   case $arg in
-    --dry-run)    DRY_RUN=true ;;
-    --base)       shift; BASE="$1" ;;
-    --base=*)     BASE="${arg#*=}" ;;
+    --dry-run) DRY_RUN=true ;;
   esac
 done
-
-# Fall back to DEFAULT_BASE if --base was not supplied
-if [[ -z "$BASE" ]]; then
-  BASE="$DEFAULT_BASE"
-fi
-
-# Abort if we still have no path
-if [[ -z "$BASE" ]]; then
-  echo "[ERROR] No base directory specified." >&2
-  echo "  Pass --base /path/to/loon_project/results, or set DEFAULT_BASE in this script." >&2
-  exit 1
-fi
-
-# Resolve to absolute path and verify it exists
-BASE="$(cd "$BASE" && pwd)"
-if [[ ! -d "$BASE" ]]; then
-  echo "[ERROR] Base directory does not exist: $BASE" >&2
-  exit 1
-fi
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 log()    { echo "[INFO]  $*"; }

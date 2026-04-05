@@ -96,7 +96,7 @@ FONT_SIZE_TICK  = 9
 FONT_SIZE_ANNOT = 8
 FONT_SIZE_LABEL = 9
 
-SEASON_ORDER = ["Breeding (May-Aug)", "Freshwater (Apr+Sep)", "Saltwater (Oct-Mar)"]
+SEASON_ORDER = ["Summer", "Fall", "Winter", "Spring"]
 # ADAPT FOR YOUR STUDY: This is the display order for cause-of-death categories
 # in the COD panel. Change these to match your study's grouping variable values.
 COD_ORDER    = ["Lead", "Parasitic_Infectious", "Trauma", "Marine", "Unknown_Other"]
@@ -179,38 +179,6 @@ def load_metadata(path: Path) -> pd.DataFrame:
     df["_TV"] = df["sample-id"].str.extract(r"(TV\d+)", expand=False)
     return df
 
-
-
-
-def assign_eco_season(metadata: pd.DataFrame) -> pd.DataFrame:
-    """Remap Date Found to ecological seasons based on loon phenology.
-    Breeding:   May-Aug  (months 5-8)  — freshwater breeding lakes
-    Freshwater: Apr+Sep  (months 4,9)  — transitional freshwater
-    Saltwater:  Oct-Mar  (months 10-3) — coastal wintering grounds
-    """
-    import re
-    def _month(date_str):
-        if not isinstance(date_str, str) or not date_str.strip():
-            return None
-        m = re.match(r'(\d{1,2})[\/\-](\d{1,2})[\/\-]', date_str.strip())
-        if m:
-            return int(m.group(1))
-        return None
-
-    def _eco(month):
-        if month is None:
-            return None
-        if 5 <= month <= 8:
-            return "Breeding (May-Aug)"
-        if month in (4, 9):
-            return "Freshwater (Apr+Sep)"
-        return "Saltwater (Oct-Mar)"
-
-    if "Date Found" not in metadata.columns:
-        raise ValueError("--eco-season requires a 'Date Found' column in metadata")
-    metadata = metadata.copy()
-    metadata["Season"] = metadata["Date Found"].apply(lambda d: _eco(_month(d)))
-    return metadata
 
 def merge_data(relabund, metadata, cod_metadata):
     """Merge relabund with metadata on TV ID extracted from sample index."""
@@ -491,48 +459,31 @@ def build_figure(
     palette_name: str,
     outdir: Path,
     no_cod_panel: bool,
-    no_bubble_panel: bool = False,
 ) -> None:
     palette = PALETTES[palette_name]
     plt.rcParams["font.family"] = FONT_FAMILY
 
     has_cod = "COD_broad" in data.columns and not no_cod_panel
-    show_bubble = not no_bubble_panel
 
-    if has_cod and show_bubble:
-        # 3-panel: A (top full), B (bottom left), C (bottom right)
+    if has_cod:
         fig = plt.figure(figsize=(20, 16))
         gs = gridspec.GridSpec(2, 2, figure=fig, hspace=0.45, wspace=0.35,
                                height_ratios=[1.6, 1])
-        ax_a = fig.add_subplot(gs[0, :])
-        ax_b = fig.add_subplot(gs[1, 0])
-        ax_c = fig.add_subplot(gs[1, 1])
-    elif has_cod and not show_bubble:
-        # 2-panel: A (left tall), C (right tall)
-        fig = plt.figure(figsize=(22, 10))
-        gs = gridspec.GridSpec(1, 2, figure=fig, wspace=0.35, width_ratios=[2.2, 1])
-        ax_a = fig.add_subplot(gs[0, 0])
-        ax_b = None
-        ax_c = fig.add_subplot(gs[0, 1])
-    elif show_bubble:
-        # 2-panel: A (left), B (right)
+        ax_a = fig.add_subplot(gs[0, :])   # full width top
+        ax_b = fig.add_subplot(gs[1, 0])   # bottom left
+        ax_c = fig.add_subplot(gs[1, 1])   # bottom right
+    else:
         fig = plt.figure(figsize=(20, 12))
         gs = gridspec.GridSpec(1, 2, figure=fig, wspace=0.35, width_ratios=[1.8, 1])
         ax_a = fig.add_subplot(gs[0, 0])
         ax_b = fig.add_subplot(gs[0, 1])
-        ax_c = None
-    else:
-        # Panel A only
-        fig, ax_a = plt.subplots(figsize=(16, 10))
-        ax_b = None
         ax_c = None
 
     # Panel A
     plot_panel_a(ax_a, data, taxa_cols, top_n, palette, SEASON_ORDER)
 
     # Panel B
-    if ax_b is not None:
-        plot_panel_b(ax_b, data_full, palette, SEASON_ORDER)
+    plot_panel_b(ax_b, data_full, palette, SEASON_ORDER)   # ← use data_full
 
     # Panel C
     if ax_c is not None:
@@ -540,8 +491,8 @@ def build_figure(
 
     # Figure-level annotation
     fig.text(0.5, 0.01,
-             "Ecological season assignment based on loon phenology (Breeding: May-Aug; Freshwater: Apr+Sep; Saltwater: Oct-Mar). "
-             "Saltwater-season samples are dominated by marine prey; Breeding-season samples by freshwater Actinopterygii. "
+             "Seasonal dietary composition is consistent with known Common Loon migration ecology "
+             "(marine prey in Winter/Spring; freshwater prey in Summer) "
              f"but does not differ significantly between mortality groups (χ² p={_compute_chi2_p(data_full):.4f}).",
              ha="center", va="bottom", fontsize=FONT_SIZE_ANNOT,
              style="italic", color="#555555")
@@ -586,12 +537,8 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Number of top taxa to show individually. Default: 12.")
     opt.add_argument("--outdir", type=Path, default=Path("."),
                      help="Output directory. Default: current directory.")
-    opt.add_argument("--no-bubble-panel", action="store_true", default=False,
-                        help="Suppress Panel B (bubble chart). Use with --no-cod-panel for Panel A only.")
     opt.add_argument("--no-cod-panel", action="store_true", default=False,
                      help="Suppress Panel C even if --cod-metadata is provided.")
-    opt.add_argument("--eco-season", action="store_true", default=False,
-                        help="Remap Date Found to ecological seasons (Breeding/Freshwater/Saltwater) instead of using Season column.")
     opt.add_argument("--exclude-groups", nargs="+", default=["Marine"],
                      help="Groups to exclude from Panel A barplot. Default: Marine.")
     return p
@@ -611,9 +558,6 @@ def main(argv=None) -> int:
     # Load
     relabund = load_relabund(args.relabund)
     metadata = load_metadata(args.metadata)
-    if args.eco_season:
-        metadata = assign_eco_season(metadata)
-        log.info("Eco-season remapping applied: %s", metadata["Season"].value_counts().to_dict())
     cod_meta = None
     if args.cod_metadata and args.cod_metadata.exists():
         cod_meta = load_metadata(args.cod_metadata)
@@ -656,7 +600,6 @@ def main(argv=None) -> int:
         palette_name=args.palette,
         outdir=args.outdir,
         no_cod_panel=args.no_cod_panel,
-        no_bubble_panel=args.no_bubble_panel,
     )
 
     log.info("=== Done. Figures in: %s ===", args.outdir)

@@ -40,14 +40,17 @@ def month_to_season(month: int) -> str:
     Returns an empty string for any value outside 1-12; QIIME2 treats empty
     metadata values as missing and skips them in group-significance tests.
     """
-    if month in (12, 1, 2):
-        return "Winter"
-    elif month in (3, 4, 5):
-        return "Spring"
-    elif month in (6, 7, 8):
-        return "Summer"
-    elif month in (9, 10, 11):
-        return "Fall"
+    # Loon ecological seasons based on published phenology (Paruk et al. 2021):
+    #   Breeding:              May-August     (on freshwater breeding lakes)
+    #   Freshwater_Nonbreeding: April, September (transitional freshwater)
+    #   Saltwater:             October-March  (wintering on saltwater)
+    # ADAPT: change these ranges for your study species and region.
+    if month in (5, 6, 7, 8):
+        return "Breeding"
+    elif month in (4, 9):
+        return "Freshwater_Nonbreeding"
+    elif month in (10, 11, 12, 1, 2, 3):
+        return "Saltwater"
     return ""
 
 
@@ -119,7 +122,7 @@ def main():
         season_idx = None
         replace_mode = False
 
-    counts = {"Winter": 0, "Spring": 0, "Summer": 0, "Fall": 0, "unknown": 0}
+    counts = {"Breeding": 0, "Freshwater_Nonbreeding": 0, "Saltwater": 0, "unknown": 0}
     out_lines = []
 
     for i, line in enumerate(lines):
@@ -171,7 +174,7 @@ def main():
 
     print(f"✅ Written to: {out_path}")
     print(f"\nSeason counts:")
-    for season in ["Summer", "Fall", "Winter", "Spring"]:
+    for season in ["Breeding", "Freshwater_Nonbreeding", "Saltwater"]:
         print(f"  {season:8s}: {counts[season]}")
     print(f"  {'unknown':8s}: {counts['unknown']} (empty date — will be skipped in QIIME2)")
 

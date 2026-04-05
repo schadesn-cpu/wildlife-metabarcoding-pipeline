@@ -310,12 +310,19 @@ Generate PCoA and alpha diversity figures coloured by COD_broad.
     ]
 
     log.info("── Figures: COD_broad PCoA + alpha ─────────────────────────")
+
+    # Resolve the path to 06_plot_diversity.py relative to THIS script's location
+    # so that 05b can be called from any working directory without breaking.
+    # Using sys.executable ensures the same Python interpreter (and therefore the
+    # same conda environment and installed packages) is used for the subprocess.
+    plot_script = str(Path(__file__).resolve().parent / "06_plot_diversity.py")
+
     for palette in palettes:
 
         if pcoa_artifacts:
             stem = f"{marker}_COD_pcoa_{palette}"
             cmd = (
-                ["python", "scripts/06_plot_diversity.py", "pcoa"]
+                [sys.executable, plot_script, "pcoa"]
                 + ["--artifact"] + pcoa_artifacts
                 + [
                     "--metadata",    str(metadata),
@@ -335,7 +342,7 @@ Generate PCoA and alpha diversity figures coloured by COD_broad.
         if alpha_artifacts:
             stem = f"{marker}_COD_alpha_{palette}"
             cmd = (
-                ["python", "scripts/06_plot_diversity.py", "alpha"]
+                [sys.executable, plot_script, "alpha"]
                 + ["--artifact"] + alpha_artifacts
                 + [
                     "--metadata",    str(metadata),

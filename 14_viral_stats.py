@@ -60,6 +60,9 @@ log = logging.getLogger(__name__)
 
 BLAST_COL  = "BLAST nt"
 NO_HIT_TAG = "no-hit"
+# ADAPT FOR YOUR STUDY: This regex extracts the short sample ID from the
+# full sample name in your metadata. For loons, IDs look like TV230084.
+# Change this pattern to match your own sample naming convention.
 TV_REGEX   = r"(TV\d+)"
 
 
@@ -320,12 +323,34 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
 
+    # Check input files exist before doing any work
+    if not args.xlsx.exists():
+        log.error("Excel file not found: %s", args.xlsx)
+        log.error("  Check --xlsx points to your analysis workbook.")
+        return 1
+    if not args.metadata.exists():
+        log.error("Metadata file not found: %s", args.metadata)
+        log.error("  Check --metadata points to your QIIME2 metadata TSV.")
+        return 1
+
     # Load data
     log.info("Loading sheet '%s' from %s", args.sheet, args.xlsx)
-    df = load_sheet(args.xlsx, args.sheet)
+    try:
+        df = load_sheet(args.xlsx, args.sheet)
+    except ValueError as e:
+        log.error("%s", e)
+        log.error("  Available sheets can be checked by opening the workbook in Excel.")
+        return 1
+    except Exception as e:
+        log.error("Failed to read Excel file: %s", e)
+        return 1
 
     log.info("Loading metadata from %s", args.metadata)
-    meta = load_metadata(args.metadata, args.group_by)
+    try:
+        meta = load_metadata(args.metadata, args.group_by)
+    except ValueError as e:
+        log.error("%s", e)
+        return 1
 
     # Compute signal
     per_sample = compute_per_sample(df, taxon_filter=args.taxon_filter)

@@ -72,6 +72,8 @@ def _parse_html(html: str) -> "Optional[dict]":
     Extract key/value pairs from the QIIME2 beta-group-significance HTML table.
     Handles both PERMANOVA (pseudo-F) and PERMDISP (F-value).
     """
+    # Strip tags, extract text content from each <td> and <th> pair
+    # Pattern: <th>key</th> ... <td>value</td>
     rows = re.findall(
         r'<th[^>]*>(.*?)</th>\s*<td[^>]*>(.*?)</td>',
         html, re.DOTALL
@@ -107,22 +109,13 @@ METRIC_PATTERNS = {
     "jaccard":            ["jaccard"],
 }
 
+METHOD_PATTERNS = {
+    "permanova": ["permanova"],
+    "permdisp":  ["permdisp"],
+}
+
 
 def _infer_metric(name: str) -> str:
-    """
-    Infer the beta diversity metric from a QZV filename or folder name.
-
-    Checks the name against METRIC_PATTERNS in order; returns the first match,
-    or 'unknown' if none match. Order matters: 'weighted_unifrac' is checked
-    before 'weighted' to avoid the shorter pattern matching first.
-
-    Args:
-        name: QZV stem or directory name (e.g. 'weighted_unifrac_permanova_Group').
-
-    Returns:
-        One of 'unweighted_unifrac', 'weighted_unifrac', 'bray_curtis',
-        'jaccard', or 'unknown'.
-    """
     name_l = name.lower()
     for metric, patterns in METRIC_PATTERNS.items():
         if any(p in name_l for p in patterns):
@@ -130,17 +123,16 @@ def _infer_metric(name: str) -> str:
     return "unknown"
 
 
+def _infer_method(name: str) -> str:
+    name_l = name.lower()
+    for method, patterns in METHOD_PATTERNS.items():
+        if any(p in name_l for p in patterns):
+            return method
+    return "unknown"
+
+
 def _infer_group(name: str) -> str:
-    """
-    Extract the metadata group column name from a QZV filename or folder name.
-
-    Strips known metric and method tokens, then joins the remaining parts with
-    underscores. For example:
-        'weighted_unifrac_permanova_Group' -> 'Group'
-        'bray_curtis_permdisp_DiseaseStatus' -> 'DiseaseStatus'
-
-    Returns an empty string if all parts are known tokens.
-    """
+    """Try to pull the group column name from the filename."""
     # e.g. weighted_unifrac_permanova_Group.qzv -> Group
     parts = Path(name).stem.split("_")
     skip = {"weighted", "unifrac", "unweighted", "bray", "curtis", "jaccard",
@@ -203,14 +195,9 @@ COLUMNS = [
     "statistic", "p_value", "n_permutations", "sample_size", "source"
 ]
 
+DISPLAY_COLS = ["Metric", "Group", "Method", "Statistic", "Value", "p-value", "Permutations", "n"]
 
 def _sig(p: str) -> str:
-    """
-    Convert a p-value string to a significance star notation.
-
-    Returns '***' (p<=0.001), '**' (p<=0.01), '*' (p<=0.05), 'ns' (p>0.05),
-    or '' if the string cannot be parsed as a float.
-    """
     try:
         v = float(p)
         if v <= 0.001: return "***"
@@ -222,17 +209,6 @@ def _sig(p: str) -> str:
 
 
 def print_table(results: list[dict]) -> None:
-    """
-    Print a formatted summary table of PERMANOVA/PERMDISP results to stdout.
-
-    Results are sorted by metric (Weighted UniFrac -> Unweighted -> Bray-Curtis
-    -> Jaccard) and then by method (PERMANOVA before PERMDISP). Each row shows
-    the metric, group column, method, test statistic name and value, p-value,
-    number of permutations, sample size, and significance stars.
-
-    Args:
-        results: List of result dicts from collect_results().
-    """
     if not results:
         print("No PERMANOVA/PERMDISP results found.")
         return
@@ -244,6 +220,7 @@ def print_table(results: list[dict]) -> None:
         0 if r["method"] == "permanova" else 1
     ))
 
+    col_w = [22, 12, 10, 10, 8, 8, 14, 6, 4]
     header = (
         f"{'Metric':<22}  {'Group':<12}  {'Method':<10}  "
         f"{'Statistic':<10}  {'Value':>8}  {'p-value':>8}  "
@@ -255,7 +232,7 @@ def print_table(results: list[dict]) -> None:
     print(rule)
     for r in results:
         label = METRIC_LABELS.get(r["metric"], r["metric"])
-        stat  = r["statistic_name"].replace("-value", "")
+        stat  = r["statistic_name"].replace("pseudo-", "pseudo-").replace("-value", "")
         try:
             val = f"{float(r['statistic']):.4f}"
         except ValueError:
@@ -275,17 +252,6 @@ def print_table(results: list[dict]) -> None:
 
 
 def write_tsv(results: list[dict], output: Path) -> None:
-    """
-    Write PERMANOVA/PERMDISP results to a tab-separated file.
-
-    Columns: metric, group_column, method, statistic_name, statistic,
-    p_value, n_permutations, sample_size, source. Extra keys are ignored.
-    The file can be passed to 07_visualize_diversity.py via --stats-tsv.
-
-    Args:
-        results: List of result dicts from collect_results().
-        output:  Destination path for the TSV file.
-    """
     with output.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=COLUMNS, delimiter="\t",
                                 extrasaction="ignore")
@@ -297,12 +263,6 @@ def write_tsv(results: list[dict], output: Path) -> None:
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    """
-    Parse command-line arguments, scan for PERMANOVA/PERMDISP results, print
-    a formatted table to stdout, and optionally write a summary TSV.
-
-    Exit codes: sys.exit(1) if --stats-dir does not exist; otherwise exits 0.
-    """
     ap = argparse.ArgumentParser(
         description="Parse QIIME 2 beta-group-significance QZVs into a summary table."
     )

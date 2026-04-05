@@ -3,56 +3,71 @@
 08b_presence_absence.py
 =======================
 Convert a taxonomy count table to presence/absence, compute detection
-frequencies, and generate detection barplots for tick blood meal analysis.
+frequencies, and generate detection barplots. Designed as a universal
+presence/absence framework for any amplicon metabarcoding marker where
+relative read abundance is not a reliable proxy for biological quantity.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PHILOSOPHY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Blood meal metabarcoding data is not a standard community diversity
-dataset. Each tick is treated as an independent detection unit, not a
-community sample. The key questions are:
+Amplicon metabarcoding count data is not a standard community diversity
+dataset in many study designs. Each sample is treated as an independent
+detection unit. The key questions are:
 
-  - Was host taxon X detected in tick Y?  (presence/absence)
-  - Across all ticks, how frequently was host X detected?  (detection freq)
+  - Was taxon X detected in sample Y?          (presence/absence)
+  - Across all samples, how frequently was X detected?  (detection freq)
 
-This is the standard analytical framework for blood meal studies
-(Borland & Kading 2021, DOI: 10.3390/insects12010037; Balasubramanian
-et al. 2024, DOI: 10.1002/edn3.522).
+This framework is appropriate whenever relative read abundance cannot be
+defended as a proxy for biological quantity. Common cases include:
 
-Relative read abundance is NOT a reliable proxy for feeding intensity or
-host biomass because:
-  - Blood meal DNA is degraded and variably amplified
-  - PCR efficiency differs across host taxa
-  - A tick may have fed on multiple hosts at different times
+  - Dietary metabarcoding (MiFish, cytb, COI): PCR efficiency differs
+    across prey taxa, mitochondrial copy number varies by tissue and
+    species, and digestion state affects DNA yield independently of
+    consumption amount. Deagle et al. (2019, Mol. Ecol.) is the
+    standard reference for why presence/absence is the preferred unit.
 
-This script implements the approach recommended by Lawrence Gordon and
-Zeb Antonioli: apply read-count quality filters, then convert to binary
-presence/absence, then summarize as detection frequency.
+  - Blood meal metabarcoding (COI, 12S, 16S): blood meal DNA is
+    degraded and variably amplified; a single sample may contain DNA
+    from multiple feeding events at different times. Framework
+    recommended by Borland & Kading (2021, DOI: 10.3390/insects12010037)
+    and Balasubramanian et al. (2024, DOI: 10.1002/edn3.522).
+
+  - Any marker with low rarefaction depth: at <=200 reads per sample,
+    relative abundance estimates have variance too large to be
+    meaningfully interpreted. Presence/absence is the only statistically
+    honest choice.
+
+The approach: apply read-count quality filters, convert to binary 0/1,
+then summarize as detection frequency per group.
+
+Use --sample-label to replace the generic "sample" with a study-specific
+term in all output text (e.g. "loon", "tick", "individual").
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PIPELINE POSITION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  08_taxonomy_table.py  →  taxonomy_counts_L{N}_{marker}.tsv
-                                        ↓
-                        08b_presence_absence.py  ← metadata TSV (optional)
-                                        ↓
-              presence_absence_L{N}_{marker}.tsv   ← input to 05_run_diversity_stats.py
+  08_taxonomy_table.py  ->  taxonomy_counts_L{N}_{marker}.tsv
+                                        |
+                        08b_presence_absence.py  <- metadata TSV (optional)
+                                        |
+              presence_absence_L{N}_{marker}.tsv   <- input to 05_run_diversity_stats.py
               detection_freq_{marker}.tsv
               detection_freq_by_{group}_{marker}.tsv
               detection_summary_{marker}.txt
               detection_barplot_{marker}_{group}.png/.svg
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FILTERING LOGIC (Zeb Antonioli's approach)
+FILTERING LOGIC
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Applied in order before presence/absence conversion:
 
   1. --min-sample-reads   Drop samples with fewer total reads than this.
                           Avoids calling detections in near-empty samples.
-                          Default: 500
+                          Default: 500. Set lower for low-depth markers
+                          (e.g. --min-sample-reads 50 for cytb at depth 200).
 
   2. --min-taxon-reads    Drop taxa with fewer reads across the whole
                           dataset than this. Removes globally rare taxa
@@ -70,7 +85,7 @@ OUTPUTS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   presence_absence_L{N}_{marker}.tsv
-      Binary 0/1 table: taxa (rows) × samples (columns).
+      Binary 0/1 table: taxa (rows) x samples (columns).
       Direct input to 05_run_diversity_stats.py for Jaccard + PERMANOVA.
 
   detection_freq_{marker}.tsv
@@ -79,13 +94,11 @@ OUTPUTS
 
   detection_freq_by_{group}_{marker}.tsv
       Same as above but computed per group (requires --metadata --group-by).
-      Wide format: taxon × group, values = detection frequency (0–1).
+      Wide format: taxon x group, values = detection frequency (0-1).
 
   detection_summary_{marker}.txt
-      Human-readable summary following Lawrence Gordon's recommended
-      reporting format:
-        "X of Y ticks (Z%) had at least one detectable blood meal.
-         Of those, A% had Cervidae, B% had Sciuridae, ..."
+      Human-readable summary: how many samples had at least one detection,
+      per-taxon detection frequencies, and per-group breakdowns.
 
   detection_barplot_{marker}.png / .svg
       Horizontal bar chart of detection frequency (%) per taxon.
@@ -96,36 +109,50 @@ OUTPUTS
 USAGE EXAMPLES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  # cytb — basic, no grouping
+  # MiFish diet — group comparison, standard thresholds
   python 08b_presence_absence.py \\
-      --counts  results/cytb/all/taxonomy/taxonomy_counts_L7_cytb.tsv \\
-      --marker  cytb \\
-      --outdir  results/cytb/all/presence_absence/
+      --counts            results/MiFish/all/taxonomy/taxonomy_counts_L7_MiFish.tsv \\
+      --metadata          metadata/qiime/metadata_MiFish.tsv \\
+      --marker            MiFish \\
+      --group-by          Group \\
+      --min-sample-reads  10000 \\
+      --min-taxon-reads   10 \\
+      --min-relabund      0.01 \\
+      --sample-label      loon \\
+      --outdir            results/MiFish/all/presence_absence/
 
-  # cytb — with site-level grouping
-  python 08b_presence_absence.py \\
-      --counts    results/cytb/all/taxonomy/taxonomy_counts_L7_cytb.tsv \\
-      --metadata  metadata/qiime/metadata_cytb.tsv \\
-      --marker    cytb \\
-      --group-by  Site \\
-      --outdir    results/cytb/all/presence_absence/
-
-  # Adjust filter thresholds (Zeb's approach)
+  # cytb — low depth marker, thresholds adjusted to match reality
+  # At rarefaction depth 200, --min-sample-reads must be <= 200.
+  # --min-relabund 0.01 requires >= 2 reads for a detection call at depth 200,
+  # which is the practical minimum for distinguishing signal from noise.
   python 08b_presence_absence.py \\
       --counts            results/cytb/all/taxonomy/taxonomy_counts_L7_cytb.tsv \\
       --metadata          metadata/qiime/metadata_cytb.tsv \\
       --marker            cytb \\
+      --group-by          Group \\
+      --min-sample-reads  50 \\
+      --min-taxon-reads   5 \\
+      --min-relabund      0.01 \\
+      --sample-label      loon \\
+      --outdir            results/cytb/all/presence_absence/
+
+  # Blood meal tick study — original use case still fully supported
+  python 08b_presence_absence.py \\
+      --counts            results/COI/all/taxonomy/taxonomy_counts_L7_COI.tsv \\
+      --metadata          metadata/qiime/metadata_COI.tsv \\
+      --marker            COI \\
       --group-by          Site \\
       --min-sample-reads  1000 \\
       --min-taxon-reads   100 \\
       --min-relabund      0.01 \\
-      --outdir            results/cytb/all/presence_absence/
+      --sample-label      tick \\
+      --outdir            results/COI/all/presence_absence/
 
-  # Dry run — see what would happen without writing files
+  # Dry run -- see what would happen without writing files
   python 08b_presence_absence.py \\
-      --counts  results/cytb/all/taxonomy/taxonomy_counts_L7_cytb.tsv \\
-      --marker  cytb \\
-      --outdir  results/cytb/all/presence_absence/ \\
+      --counts   results/cytb/all/taxonomy/taxonomy_counts_L7_cytb.tsv \\
+      --marker   cytb \\
+      --outdir   results/cytb/all/presence_absence/ \\
       --dry-run
 
 Dependencies:
@@ -444,23 +471,28 @@ def build_summary_text(
     marker: str,
     groups: Optional[pd.Series] = None,
     group_by: Optional[str] = None,
+    sample_label: str = "sample",
 ) -> str:
     """
-    Build a human-readable detection summary following Lawrence Gordon's
-    recommended reporting format:
+    Build a human-readable detection summary.
 
-      "X of Y ticks (Z%) had at least one detectable blood meal.
-       Of those, A% had Cervidae, B% had Sciuridae, ..."
+    sample_label controls the unit word used throughout (e.g. "loon",
+    "tick", "individual"). Defaults to "sample" for generic use.
 
-    If groups are provided, also reports per-group breakdowns.
+    Reports: total samples analyzed, how many had at least one detection,
+    per-taxon detection frequencies, and per-group breakdowns when groups
+    are provided.
     """
-    n_total   = len(pa.columns)
-    has_meal  = (pa.sum(axis=0) > 0)
-    n_with_meal = int(has_meal.sum())
-    pct_meal  = n_with_meal / n_total * 100 if n_total > 0 else 0.0
+    # Capitalised version for sentence starts
+    sample_label_cap = sample_label.capitalize()
 
-    # Detection frequencies among ticks WITH a detectable blood meal
-    pa_positive = pa[has_meal[has_meal].index]
+    n_total     = len(pa.columns)
+    has_det     = (pa.sum(axis=0) > 0)
+    n_with_det  = int(has_det.sum())
+    pct_det     = n_with_det / n_total * 100 if n_total > 0 else 0.0
+
+    # Detection frequencies among samples WITH at least one detection
+    pa_positive = pa[has_det[has_det].index]
     n_pos = len(pa_positive.columns)
 
     freq_among_positive = (
@@ -469,22 +501,20 @@ def build_summary_text(
     ).sort_values(ascending=False)
 
     lines: List[str] = []
-    lines.append(f"=== Blood Meal Detection Summary: {marker} ===\n")
+    lines.append(f"=== Detection Summary: {marker} ===\n")
+    lines.append(f"Total {sample_label}s analyzed        : {n_total}")
     lines.append(
-        f"Total ticks analyzed         : {n_total}"
+        f"{sample_label_cap}s with detection       : {n_with_det} / {n_total} "
+        f"({pct_det:.1f}%)"
     )
     lines.append(
-        f"Ticks with detectable meal   : {n_with_meal} / {n_total} "
-        f"({pct_meal:.1f}%)"
-    )
-    lines.append(
-        f"Ticks without detectable meal: {n_total - n_with_meal} / {n_total} "
+        f"{sample_label_cap}s with no detection    : {n_total - n_with_det} / {n_total} "
         f"(includes failed amplification and true negatives — "
-        f"these are indistinguishable)\n"
+        f"these are indistinguishable without additional data)\n"
     )
 
     lines.append(
-        "Host detection among ticks with a detectable blood meal "
+        f"Taxon detection among {sample_label}s with at least one detection "
         f"(n={n_pos}):"
     )
     for taxon, pct in freq_among_positive.items():
@@ -496,15 +526,15 @@ def build_summary_text(
         lines.append(f"\nPer-group breakdown (column: '{group_by}'):")
         group_labels = groups.reindex(pa.columns).dropna()
         for grp in sorted(group_labels.unique()):
-            samps = group_labels[group_labels == grp].index
-            samps = samps.intersection(pa.columns)
-            sub   = pa[samps]
-            n_g   = len(samps)
+            samps   = group_labels[group_labels == grp].index
+            samps   = samps.intersection(pa.columns)
+            sub     = pa[samps]
+            n_g     = len(samps)
             n_g_pos = int((sub.sum(axis=0) > 0).sum())
             pct_g   = n_g_pos / n_g * 100 if n_g > 0 else 0.0
             lines.append(
                 f"\n  {grp} (n={n_g}): "
-                f"{n_g_pos} ticks with detectable meal ({pct_g:.1f}%)"
+                f"{n_g_pos} {sample_label}s with detection ({pct_g:.1f}%)"
             )
             sub_pos = sub.loc[:, sub.sum(axis=0) > 0]
             if len(sub_pos.columns) > 0:
@@ -520,12 +550,12 @@ def build_summary_text(
                         )
 
     lines.append(
-        "\nMethods note: \"Presence/absence of host taxa was determined from "
-        "blood meal metabarcoding data. Samples with fewer than "
-        "[min_sample_reads] reads and taxa with fewer than [min_taxon_reads] "
-        "reads across the dataset were excluded prior to conversion. "
-        "Detection frequency was calculated as the proportion of ticks with "
-        "a detectable blood meal in which each host taxon was identified.\""
+        f"\nMethods note: \"Presence/absence of taxa was determined from "
+        f"amplicon metabarcoding data. {sample_label_cap}s with fewer than "
+        f"[min_sample_reads] reads and taxa with fewer than [min_taxon_reads] "
+        f"reads across the dataset were excluded prior to conversion. "
+        f"Detection frequency was calculated as the proportion of {sample_label}s "
+        f"in which each taxon was identified.\""
     )
 
     return "\n".join(lines) + "\n"
@@ -542,6 +572,7 @@ def plot_detection_freq(
     group_freq_df: Optional[pd.DataFrame] = None,
     group_by: Optional[str] = None,
     top_n: int = 20,
+    sample_label: str = "sample",
     dry_run: bool = False,
 ) -> None:
     """
@@ -552,6 +583,9 @@ def plot_detection_freq(
 
     Taxa are sorted by overall detection frequency, descending.
     Only the top_n taxa by detection frequency are shown.
+
+    sample_label controls the unit word used in the figure subtitle
+    (e.g. "loon", "tick", "sample").
     """
     # ── Prepare data ──────────────────────────────────────────────────────
     plot_data = freq_df.head(top_n).copy()
@@ -634,7 +668,7 @@ def plot_detection_freq(
     ax.grid(axis="x", linestyle="--", linewidth=0.5, alpha=0.5, zorder=0)
 
     ax.set_title(
-        f"Blood meal detection frequency — {marker} ({title_suffix})",
+        f"Detection frequency — {marker} ({title_suffix})",
         fontsize=FONT_SIZE_TITLE,
         pad=10,
     )
@@ -642,7 +676,7 @@ def plot_detection_freq(
     n_shown = len(group_freq_df) if group_freq_df is not None else n_taxa
     fig.text(
         0.5, -0.02,
-        f"Detection frequency among ticks with a detectable blood meal. "
+        f"Detection frequency among {sample_label}s with at least one detection. "
         f"Showing top {min(top_n, n_shown)} taxa.",
         ha="center", fontsize=7.5, color="#555555",
     )
@@ -698,12 +732,13 @@ def run_presence_absence(
     top_n: int,
     force: bool,
     dry_run: bool,
+    sample_label: str = "sample",
 ) -> None:
     """
     Full presence/absence pipeline:
 
-      load counts → filter → convert to 0/1 → compute detection
-      frequencies → write tables → write summary → write barplot.
+      load counts -> filter -> convert to 0/1 -> compute detection
+      frequencies -> write tables -> write summary -> write barplot.
 
     Args:
         counts_tsv:        Count TSV from 08_taxonomy_table.py.
@@ -717,6 +752,8 @@ def run_presence_absence(
         top_n:             Max taxa to show in barplots.
         force:             Overwrite existing outputs.
         dry_run:           Log intended actions without writing files.
+        sample_label:      Unit word for output text (e.g. "loon", "tick").
+                           Defaults to "sample".
     """
     safe_mkdir(outdir)
 
@@ -787,7 +824,8 @@ def run_presence_absence(
         save_tsv(group_freq_df, gfreq_path, dry_run)
 
     # Human-readable summary
-    summary_text = build_summary_text(pa, freq_df, marker, groups, group_by)
+    summary_text = build_summary_text(pa, freq_df, marker, groups, group_by,
+                                      sample_label=sample_label)
     summary_path = outdir / f"detection_summary_{marker}.txt"
     save_text(summary_text, summary_path, dry_run)
 
@@ -800,20 +838,22 @@ def run_presence_absence(
         group_freq_df = group_freq_df,
         group_by      = group_by,
         top_n         = top_n,
+        sample_label  = sample_label,
         dry_run       = dry_run,
     )
 
     # ── 7. Console summary ────────────────────────────────────────────────
     log.info("")
     log.info("=== Summary ===")
-    n_total     = len(pa.columns)
-    n_with_meal = int((pa.sum(axis=0) > 0).sum())
+    n_total    = len(pa.columns)
+    n_with_det = int((pa.sum(axis=0) > 0).sum())
     log.info(
-        "Ticks with detectable blood meal : %d / %d  (%.1f%%)",
-        n_with_meal, n_total,
-        n_with_meal / n_total * 100 if n_total > 0 else 0.0,
+        "%ss with detection : %d / %d  (%.1f%%)",
+        sample_label.capitalize(),
+        n_with_det, n_total,
+        n_with_det / n_total * 100 if n_total > 0 else 0.0,
     )
-    log.info("Top 5 host taxa by detection frequency:")
+    log.info("Top 5 taxa by detection frequency:")
     for taxon, row in freq_df.head(5).iterrows():
         log.info(
             "  %-45s  %d / %d  (%.1f%%)",
@@ -865,7 +905,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="08b_presence_absence.py",
         description=(
             "Convert taxonomy count table to presence/absence and compute "
-            "detection frequencies for tick blood meal metabarcoding.\n"
+            "detection frequencies for amplicon metabarcoding data.\n"
             "Designed to run after 08_taxonomy_table.py.\n"
             "See module docstring for full rationale and usage examples."
         ),
@@ -940,6 +980,15 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Maximum number of taxa to show in barplots. Default: 20",
     )
+    p.add_argument(
+        "--sample-label", default="sample",
+        metavar="WORD",
+        help=(
+            "Unit word used in summary text and figure subtitles. "
+            "Set to match your study design, e.g. 'loon', 'tick', 'individual'. "
+            "Default: sample"
+        ),
+    )
 
     # Execution flags
     p.add_argument(
@@ -999,6 +1048,7 @@ def main() -> int:
             top_n            = args.top_n,
             force            = args.force,
             dry_run          = args.dry_run,
+            sample_label     = args.sample_label,
         )
     except ValueError as e:
         log.error("%s", e)

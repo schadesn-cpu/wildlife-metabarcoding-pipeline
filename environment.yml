@@ -1,0 +1,57 @@
+name: metabarcoding-pipeline
+# ============================================================
+#  Wildlife Metabarcoding Pipeline — Conda Environment
+#  MEED Lab, University of New Hampshire
+#
+#  Install:
+#    conda env create -f environment.yml
+#    conda activate metabarcoding-pipeline
+#
+#  This single environment covers both the QIIME2 pipeline steps
+#  (scripts 00-05) and the Python analysis/plotting scripts (06-14).
+#
+#  Built on QIIME2 amplicon distribution 2024.5.
+#  See https://docs.qiime2.org for the official QIIME2 install docs.
+#
+#  Note: cytb reference building requires the RESCRIPt plugin, which
+#  cannot be installed into this environment on shared HPC clusters.
+#  See 00_build_classifiers.py --markers cytb for instructions on
+#  creating a separate qiime2-rescript environment.
+# ============================================================
+
+channels:
+  - qiime2/label/r2024.5
+  - conda-forge
+  - bioconda
+  - defaults
+
+dependencies:
+  # ── QIIME2 amplicon distribution ──────────────────────────
+  - qiime2-amplicon==2024.5.*
+
+  # ── Analysis and plotting ──────────────────────────────────
+  - python>=3.10
+  - numpy>=1.24
+  - pandas>=2.0
+  - scipy>=1.11
+  - matplotlib>=3.8
+  - biopython>=1.81      # phylogenetic tree plotting (10b_plot_adeno_tree.py)
+  - pyyaml>=6.0          # config file parsing (config_loader.py)
+
+  # ── Bioinformatics utilities ───────────────────────────────
+  - biom-format>=2.1     # reading BIOM feature tables
+  - cutadapt>=4.6        # primer trimming (called by 03_run_full_metabarcoding_pipeline.py)
+
+  # ── Optional: NCBI reference building ─────────────────────
+  # Uncomment if building viral or cytb reference databases
+  # - biopython            # already listed above
+  # - entrez-direct        # alternative NCBI fetch (via shell)
+
+  # ── Optional: report parsing ──────────────────────────────
+  - multiqc>=1.19        # for parse_multiqc_demux.py
+
+  # ── Pip-only packages ─────────────────────────────────────
+  - pip
+  - pip:
+    # No pip-only requirements at this time.
+    # Add any packages not available via conda here.
