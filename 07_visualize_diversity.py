@@ -106,6 +106,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+from scipy import stats as scipy_stats
 
 logging.basicConfig(
     level=logging.INFO,
@@ -424,12 +425,31 @@ def load_stats_tsv(tsv_path: Path) -> Dict[str, Dict]:
 # Confidence ellipse helper
 # ---------------------------------------------------------------------------
 
-def _confidence_ellipse(x, y, ax, n_std=2.0, **kwargs):
+def _confidence_ellipse(x, y, ax, n_std=2.448, **kwargs):
+    """
+    Draw a covariance-based confidence ellipse around a set of 2D points.
+
+    The ellipse represents the region containing approximately 95% of the
+    probability mass for a bivariate normal distribution. The correct
+    multiplier for 95% in 2D is n_std = sqrt(chi2.ppf(0.95, df=2)) ≈ 2.448,
+    NOT 2.0. Using n_std=2.0 produces an ~86% ellipse — a common error.
+
+    Reference: Friendly, Monette & Fox (2013), Statistical Science.
+               scipy.stats.chi2.ppf(0.95, df=2) = 5.991 → sqrt = 2.448
+
+    Parameters
+    ----------
+    n_std : float
+        Radius in standard deviations. Default 2.448 gives a true 95%
+        confidence ellipse for bivariate normally distributed data.
+    """
     from matplotlib.patches import Ellipse
     import matplotlib.transforms as transforms
     if len(x) < 3:
-        return
+        return  # Cannot compute meaningful covariance with fewer than 3 points
     cov = np.cov(x, y)
+    if np.any(np.isnan(cov)) or np.linalg.det(cov) == 0:
+        return  # Degenerate covariance (e.g. collinear points) — skip silently
     pearson = cov[0, 1] / np.sqrt(cov[0, 0] * cov[1, 1])
     ell = Ellipse(
         (0, 0),
@@ -462,7 +482,6 @@ def plot_alpha(
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from scipy import stats
 
     n_panels = len(alpha_qzas)
     ncols = min(n_panels, 2)
@@ -502,10 +521,10 @@ def plot_alpha(
         # Kruskal-Wallis / Mann-Whitney
         valid = [(g, v) for g, v in zip(group_order, group_vals) if len(v) >= 2]
         if len(valid) == 2:
-            _, p_val = stats.mannwhitneyu(valid[0][1], valid[1][1], alternative="two-sided")
+            _, p_val = scipy_stats.mannwhitneyu(valid[0][1], valid[1][1], alternative="two-sided")
             p_label = f"Mann-Whitney U  p = {p_val:.3f}" + ("" if p_val >= 0.05 else " *")
         elif len(valid) > 2:
-            _, p_val = stats.kruskal(*[v for _, v in valid])
+            _, p_val = scipy_stats.kruskal(*[v for _, v in valid])
             p_label = f"Kruskal-Wallis  p = {p_val:.3f}" + ("" if p_val >= 0.05 else " *")
         else:
             p_val, p_label = None, ""
@@ -575,7 +594,14 @@ def plot_alpha(
                edgecolor="#ccc")
 
     plt.tight_layout(rect=[0, 0.04, 1, 0.98])
-    fig.savefig(outpath, dpi=180, bbox_inches="tight", facecolor="white")
+    try:
+        fig.savefig(outpath, dpi=180, bbox_inches="tight", facecolor="white")
+    except OSError as exc:
+        raise OSError(
+            f"Could not write alpha figure to {outpath}.\n"
+            f"  Check that the output directory exists and is writable.\n"
+            f"  Original error: {exc}"
+        ) from exc
     plt.close()
     log.info("Alpha diversity figure saved: %s", outpath)
 
@@ -675,25 +701,34 @@ def plot_beta(
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
 
-        # Stats — use pre-computed if available, else compute on-the-fly
+        # Stats — use pre-computed if available, else compute on-the-fly.
+        # perm_f/perm_p start as NaN; they are only set if a valid source exists.
         perm_f, perm_p = float("nan"), float("nan")
         disp_f, disp_p = float("nan"), float("nan")
 
         if metric_name in precomp_stats:
+            # Pre-computed stats were loaded from a QZV or JSON — use them directly.
             ms = precomp_stats[metric_name]
             if "permanova" in ms:
                 perm_f, perm_p = ms["permanova"]["F"], ms["permanova"]["p"]
             if "permdisp" in ms:
                 disp_f, disp_p = ms["permdisp"]["F"], ms["permdisp"]["p"]
-        elif metric_name in dm_lookup and not np.isnan(perm_f):
-            pass  # already set
         elif metric_name in dm_lookup:
+            # No pre-computed stats — compute PERMANOVA and PERMDISP on-the-fly
+            # from the distance matrix using scikit-bio.
             log.info("Computing PERMANOVA for %s...", metric_name)
             perm_f, perm_p = compute_permanova(dm_lookup[metric_name], group_series, n_perm)
             log.info("Computing PERMDISP for %s...", metric_name)
             try:
                 disp_f, disp_p = compute_permdisp(dm_lookup[metric_name], group_series, n_perm)
-            except Exception:
+            except Exception as e:
+                # PERMDISP can fail when group sizes are too unequal or when the
+                # distance matrix contains all-zero rows. Log the reason so it is
+                # visible in the run log rather than disappearing silently.
+                log.warning(
+                    "PERMDISP failed for %s (result will show NaN): %s",
+                    metric_name, e,
+                )
                 disp_f, disp_p = float("nan"), float("nan")
 
         perm_sig = not np.isnan(perm_p) and perm_p <= 0.05
@@ -750,7 +785,14 @@ def plot_beta(
                frameon=True, bbox_to_anchor=(0.5, 0.01), edgecolor="#ccc")
 
     plt.tight_layout(rect=[0, 0.05, 1, 0.97])
-    fig.savefig(outpath, dpi=180, bbox_inches="tight", facecolor="white")
+    try:
+        fig.savefig(outpath, dpi=180, bbox_inches="tight", facecolor="white")
+    except OSError as exc:
+        raise OSError(
+            f"Could not write beta figure to {outpath}.\n"
+            f"  Check that the output directory exists and is writable.\n"
+            f"  Original error: {exc}"
+        ) from exc
     plt.close()
     log.info("Beta diversity figure saved: %s", outpath)
 
