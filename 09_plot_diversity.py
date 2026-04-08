@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-06_plot_diversity.py
+09_plot_diversity.py
 ====================
 Standalone diversity visualization script for metabarcoding projects.
 Reads QIIME2 artifacts directly (.qza files) — no QIIME2 installation needed.
@@ -13,14 +13,14 @@ Output formats: PNG (300 dpi) + SVG (Illustrator-editable) per figure.
 
 Usage:
   # Single beta metric, colored by Group
-  python 06_plot_diversity.py pcoa \\
+  python 09_plot_diversity.py pcoa \\
     --artifact weighted_unifrac_pcoa_results.qza \\
     --metadata metadata/qiime/metadata_16S.tsv \\
     --color-by Group \\
     --output-dir results/figures/
 
   # All beta metrics at once
-  python 06_plot_diversity.py pcoa \\
+  python 09_plot_diversity.py pcoa \\
     --artifact weighted_unifrac_pcoa_results.qza unweighted_unifrac_pcoa_results.qza \\
                 bray_curtis_pcoa_results.qza jaccard_pcoa_results.qza \\
     --metadata metadata/qiime/metadata_16S.tsv \\
@@ -28,7 +28,7 @@ Usage:
     --output-dir results/figures/
 
   # Alpha diversity
-  python 06_plot_diversity.py alpha \\
+  python 09_plot_diversity.py alpha \\
     --artifact faith_pd_vector.qza shannon_vector.qza \\
                observed_features_vector.qza evenness_vector.qza \\
     --metadata metadata/qiime/metadata_16S.tsv \\
@@ -36,7 +36,7 @@ Usage:
     --output-dir results/figures/
 
   # Panel of all four beta metrics in one figure
-  python 06_plot_diversity.py pcoa \\
+  python 09_plot_diversity.py pcoa \\
     --artifact weighted_unifrac_pcoa_results.qza unweighted_unifrac_pcoa_results.qza \\
                 bray_curtis_pcoa_results.qza jaccard_pcoa_results.qza \\
     --metadata metadata/qiime/metadata_16S.tsv \\
@@ -1340,7 +1340,7 @@ def cmd_list_columns(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     """
-    Build and return the top-level argument parser for 06_plot_diversity.py.
+    Build and return the top-level argument parser for 09_plot_diversity.py.
 
     Two subcommands are available:
       pcoa    — 2D PCoA scatter plots from beta diversity QZAs, with optional
@@ -1361,10 +1361,10 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Examples:\n\n"
             "  # Check what columns are available in your metadata\n"
-            "  python 06_plot_diversity.py columns \\\n"
+            "  python 09_plot_diversity.py columns \\\n"
             "    --metadata metadata/qiime/metadata_16S.tsv\n\n"
             "  # 2D PCoA panel of all four beta metrics, colored by Group\n"
-            "  python 06_plot_diversity.py pcoa \\\n"
+            "  python 09_plot_diversity.py pcoa \\\n"
             "    --artifact weighted_unifrac_pcoa_results.qza \\\n"
             "               unweighted_unifrac_pcoa_results.qza \\\n"
             "               bray_curtis_pcoa_results.qza \\\n"
@@ -1374,7 +1374,7 @@ def build_parser() -> argparse.ArgumentParser:
             "    --group-order Diseased Trauma Marine \\\n"
             "    --output-dir results/figures/\n\n"
             "  # Alpha diversity panel, all four metrics\n"
-            "  python 06_plot_diversity.py alpha \\\n"
+            "  python 09_plot_diversity.py alpha \\\n"
             "    --artifact faith_pd_vector.qza shannon_vector.qza \\\n"
             "               observed_features_vector.qza evenness_vector.qza \\\n"
             "    --metadata metadata/qiime/metadata_16S.tsv \\\n"
@@ -1434,7 +1434,7 @@ def build_parser() -> argparse.ArgumentParser:
     pc.add_argument(
         "--stats-dir", default=None, metavar="DIR",
         help=(
-            "Directory containing PERMANOVA QZVs (from 05_run_diversity_stats.py). "
+            "Directory containing PERMANOVA QZVs (from 08_run_diversity_stats.py). "
             "If provided, F-stat and p-value are annotated on each PCoA panel. "
             "Note: always report PERMDISP alongside PERMANOVA in the manuscript."
         ),
@@ -1518,7 +1518,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     """
-    Entry point for 06_plot_diversity.py.
+    Entry point for 09_plot_diversity.py.
 
     Parses the subcommand (pcoa, alpha, or columns), dispatches to the
     appropriate function, and writes PNG + SVG outputs to --output-dir.

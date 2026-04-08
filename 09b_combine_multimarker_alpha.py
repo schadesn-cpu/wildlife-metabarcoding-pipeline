@@ -5,7 +5,7 @@
 Combine four single-marker Observed Features alpha diversity plots into one
 publication-ready 4-panel figure (panels A–D, left to right).
 
-This script runs after 06_plot_diversity.py has generated the per-marker
+This script runs after 09_plot_diversity.py has generated the per-marker
 alpha diversity PNG files. It reads those PNGs and assembles them into a
 single figure suitable for a methods comparison figure or supplementary panel.
 
@@ -81,7 +81,7 @@ def build_figure(panels: list, fig_dir: pathlib.Path) -> plt.Figure:
         print("[ERROR] The following input images were not found:", file=sys.stderr)
         for m in missing:
             print(f"  {m}", file=sys.stderr)
-        print("\nRun 06_plot_diversity.py first to generate per-marker figures,",
+        print("\nRun 09_plot_diversity.py first to generate per-marker figures,",
               file=sys.stderr)
         print("or check --fig-dir points to the correct directory.",
               file=sys.stderr)
@@ -143,7 +143,7 @@ def main() -> int:
 
     if not fig_dir.exists():
         print(f"[ERROR] --fig-dir not found: {fig_dir}", file=sys.stderr)
-        print("  Run 06_plot_diversity.py first to generate per-marker figures.",
+        print("  Run 09_plot_diversity.py first to generate per-marker figures.",
               file=sys.stderr)
         return 1
 

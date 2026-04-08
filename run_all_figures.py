@@ -42,13 +42,13 @@ import config_loader as _cl
 
 
 def _find_plot_script() -> Path:
-    """Locate 06_plot_diversity.py in scripts/ or the same directory."""
+    """Locate 09_plot_diversity.py in scripts/ or the same directory."""
     for d in [_PIPELINE_DIR, _PIPELINE_DIR.parent]:
-        p = d / "06_plot_diversity.py"
+        p = d / "09_plot_diversity.py"
         if p.exists():
             return p
     raise FileNotFoundError(
-        "06_plot_diversity.py not found.\n"
+        "09_plot_diversity.py not found.\n"
         f"  Searched: {_PIPELINE_DIR}  and  {_PIPELINE_DIR.parent}"
     )
 
@@ -90,7 +90,7 @@ def no_meta(path, label: str) -> bool:
 
 def run(args: list, dry_run: bool, label: str) -> None:
     """
-    Run 06_plot_diversity.py as a subprocess.
+    Run 09_plot_diversity.py as a subprocess.
 
     Uses sys.executable so the same conda environment is used for the
     subprocess. Raises RuntimeError on non-zero exit so failures propagate
@@ -318,10 +318,10 @@ _TAXONOMY_RELABUND = {
 
 def _find_taxonomy_script() -> Path:
     for d in [_PIPELINE_DIR, _PIPELINE_DIR.parent]:
-        p = d / "09_plot_taxonomy.py"
+        p = d / "10_plot_taxonomy.py"
         if p.exists():
             return p
-    raise FileNotFoundError("09_plot_taxonomy.py not found.")
+    raise FileNotFoundError("10_plot_taxonomy.py not found.")
 
 
 def run_tax(args: list, dry_run: bool, label: str) -> None:

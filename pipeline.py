@@ -139,7 +139,7 @@ def run_script(
 
     Parameters
     ----------
-    script_name : filename of the script in scripts/ (e.g. '08_taxonomy_table.py')
+    script_name : filename of the script in scripts/ (e.g. '07_taxonomy_table.py')
     args        : list of CLI arguments to pass to the script
     dry_run     : if True, print the command without executing
     label       : human-readable step name for logging
@@ -185,7 +185,7 @@ def step_qc(cfg, dry_run: bool) -> None:
     report_path.parent.mkdir(parents=True, exist_ok=True)
 
     run_script(
-        "primer_advisor.py",
+        "04d_primer_advisor.py",
         ["detect", "--all",
          "--reads-dir", str(reads_dir),
          "--report",    str(report_path)],
@@ -208,7 +208,7 @@ def step_import(cfg, dry_run: bool) -> None:
 
     # 1. Build manifests
     run_script(
-        "01_make_manifests.py",
+        "03_make_manifests.py",
         ["--reads-dir", str(reads_dir),
          "--outdir",    str(import_dir),
          "--markers"] + cfg.active_markers,
@@ -223,7 +223,7 @@ def step_import(cfg, dry_run: bool) -> None:
             log.warning("  Manifest not found for %s — skipping import", marker)
             continue
         run_script(
-            "03_run_full_metabarcoding_pipeline.py",
+            "05_run_full_metabarcoding_pipeline.py",
             ["import",
              "--marker",   marker,
              "--manifest", str(manifest),
@@ -247,7 +247,7 @@ def step_denoise(cfg, dry_run: bool) -> None:
     for marker in cfg.active_markers:
         marker_cfg = cfg.markers.get(marker, {})
         run_script(
-            "03_run_full_metabarcoding_pipeline.py",
+            "05_run_full_metabarcoding_pipeline.py",
             ["cutadapt",
              "--marker", marker,
              "--outdir", str(cfg.resolve("qiime2"))],
@@ -255,7 +255,7 @@ def step_denoise(cfg, dry_run: bool) -> None:
             label=f"Cutadapt: {marker}",
         )
         run_script(
-            "03_run_full_metabarcoding_pipeline.py",
+            "05_run_full_metabarcoding_pipeline.py",
             ["dada2",
              "--marker", marker,
              "--outdir", str(cfg.resolve("qiime2"))],
@@ -269,7 +269,7 @@ def step_taxonomy(cfg, dry_run: bool) -> None:
     Taxonomic classification and table export for all active markers.
 
     Calls 03_run_full_metabarcoding_pipeline.py taxonomy for classification,
-    then 08_taxonomy_table.py to export human-readable count TSVs.
+    then 07_taxonomy_table.py to export human-readable count TSVs.
     """
     for marker in cfg.active_markers:
         marker_cfg  = cfg.markers.get(marker, {})
@@ -278,7 +278,7 @@ def step_taxonomy(cfg, dry_run: bool) -> None:
 
         # Classify
         run_script(
-            "03_run_full_metabarcoding_pipeline.py",
+            "05_run_full_metabarcoding_pipeline.py",
             ["taxonomy",
              "--marker",     marker,
              "--classifier", str(classifier),
@@ -289,7 +289,7 @@ def step_taxonomy(cfg, dry_run: bool) -> None:
 
         # Export to TSV count tables
         run_script(
-            "08_taxonomy_table.py",
+            "07_taxonomy_table.py",
             ["--taxonomy", str(cfg.resolve(f"qiime2/{marker}/all/taxonomy/taxonomy.qza")),
              "--table",    str(cfg.resolve(f"qiime2/{marker}/all/dada2/table_no_controls.qza")),
              "--marker",   marker,
@@ -306,7 +306,7 @@ def step_diversity(cfg, dry_run: bool) -> None:
     For each active marker:
       1. Generates alpha-rarefaction QZV
       2. Runs core-metrics-[phylogenetic] at the configured depth
-      3. Runs PERMANOVA + alpha group-significance via 05_run_diversity_stats.py
+      3. Runs PERMANOVA + alpha group-significance via 08_run_diversity_stats.py
     """
     for marker in cfg.active_markers:
         marker_cfg = cfg.markers.get(marker, {})
@@ -317,7 +317,7 @@ def step_diversity(cfg, dry_run: bool) -> None:
         # Core metrics
         div_dir = cfg.resolve(f"qiime2/{marker}/all/diversity")
         run_script(
-            "03_run_full_metabarcoding_pipeline.py",
+            "05_run_full_metabarcoding_pipeline.py",
             ["diversity",
              "--marker",   marker,
              "--depth",    str(depth),
@@ -334,7 +334,7 @@ def step_diversity(cfg, dry_run: bool) -> None:
         results_dir = cfg.resolve(f"results/{marker}/DvT/diversity")
 
         run_script(
-            "05_run_diversity_stats.py",
+            "08_run_diversity_stats.py",
             ["--marker",       marker,
              "--dataset",      "DvT",
              "--metadata",     str(meta_path),
@@ -369,7 +369,7 @@ def step_cod(cfg, dry_run: bool) -> None:
             continue
 
         run_script(
-            "05b_run_cod_diversity.py",
+            "08b_run_cod_diversity.py",
             ["--marker",      marker,
              "--metrics-dir", str(core_dir),
              "--metadata",    str(meta_path)]

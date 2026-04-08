@@ -3,7 +3,7 @@
 10b_annotate_diet_ecology.py
 ============================
 Add ecological and lay-friendly annotations to a cleaned dietary
-metabarcoding taxonomy table produced by 09b_clean_diet_table.py.
+metabarcoding taxonomy table produced by 11_clean_diet_table.py.
 
 Purpose
 -------
@@ -270,7 +270,7 @@ PREY_LOOKUP: Dict[str, Tuple[str, str, str]] = {
 # FAMILY FALLBACK TABLE
 # ---------------------------------------------------------------------------
 # Used when species-level match fails. Map family name → annotation.
-# This handles "Cottidae (family)" rows from 09b_clean_diet_table.py
+# This handles "Cottidae (family)" rows from 11_clean_diet_table.py
 # where the species could not be resolved.
 
 FAMILY_FALLBACK: Dict[str, Tuple[str, str, str]] = {
@@ -535,7 +535,7 @@ def run_annotation(
     report_lines += [
         "",
         "Next step — generate annotated barplot:",
-        f"  python 09_plot_taxonomy.py \\",
+        f"  python 10_plot_taxonomy.py \\",
         f"    --relabund  <relabund_file> \\",
         f"    --annotation {outdir / f'annotation_table.tsv'} \\",
         f"    --group-col common_group \\",
@@ -584,7 +584,7 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=__doc__,
     )
     p.add_argument("--counts", type=Path,
-                   help="Cleaned taxonomy count TSV from 09b_clean_diet_table.py")
+                   help="Cleaned taxonomy count TSV from 11_clean_diet_table.py")
     p.add_argument("--marker", default="MiFish",
                    help="Marker name for output file naming (default: MiFish)")
     p.add_argument("--outdir", type=Path,

@@ -8,7 +8,7 @@ Identifies ASVs that the classifier could not resolve below a specified
 taxonomic rank (default: class), extracts their sequences, runs BLASTn
 against a local or remote NCBI nt database, resolves taxids to species
 names via NCBI E-utilities, and generates a flagged report for manual
-review before cleaning (09b_clean_diet_table.py).
+review before cleaning (11_clean_diet_table.py).
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PIPELINE POSITION
@@ -20,7 +20,7 @@ PIPELINE POSITION
                     blast_qc_report_{marker}.txt   ← human review
                     confirmed_artefacts_{marker}.txt ← pass to 09b
                          ↓
-                  09b_clean_diet_table.py  (--exclude-asvs flag)
+                  11_clean_diet_table.py  (--exclude-asvs flag)
                          ↓
                   downstream figures / diversity
 
@@ -502,7 +502,7 @@ def write_report(
                 f"({row.get('pident', 'N/A')}% identity)",
                 f"  Accession  : {row.get('accession', 'N/A')}",
                 f"  Reason     : {row.get('conflict_reason', 'N/A')}",
-                f"  Action     : ADD to ARTEFACT_SPECIES in 09b_clean_diet_table.py",
+                f"  Action     : ADD to ARTEFACT_SPECIES in 11_clean_diet_table.py",
             ]
 
     lines += [
@@ -532,8 +532,8 @@ def write_report(
         f"",
         f"  1. Review confirmed conflicts above",
         f"  2. Add confirmed artefact ASV IDs to ARTEFACT_SPECIES in",
-        f"     scripts/09b_clean_diet_table.py",
-        f"  3. Rerun 09b_clean_diet_table.py to regenerate cleaned counts",
+        f"     scripts/11_clean_diet_table.py",
+        f"  3. Rerun 11_clean_diet_table.py to regenerate cleaned counts",
         f"  4. If ASVs are in QIIME2 feature table (diversity analyses),",
         f"     also filter with:",
         f"       qiime feature-table filter-features \\",
@@ -767,7 +767,7 @@ def main(argv=None) -> int:
         log.info("Next steps:")
         log.info("  1. Review %s", report_path)
         log.info("  2. Add confirmed ASV IDs to ARTEFACT_SPECIES in "
-                 "scripts/09b_clean_diet_table.py")
+                 "scripts/11_clean_diet_table.py")
         log.info("  3. Filter QIIME2 feature table using %s", artefacts_path)
         log.info("  4. Rerun core-metrics and regenerate diversity figures")
     else:

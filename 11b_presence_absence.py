@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-08b_presence_absence.py
+11b_presence_absence.py
 =======================
 Convert a taxonomy count table to presence/absence, compute detection
 frequencies, and generate detection barplots. Designed as a universal
@@ -48,11 +48,11 @@ term in all output text (e.g. "loon", "tick", "individual").
 PIPELINE POSITION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  08_taxonomy_table.py  ->  taxonomy_counts_L{N}_{marker}.tsv
+  07_taxonomy_table.py  ->  taxonomy_counts_L{N}_{marker}.tsv
                                         |
-                        08b_presence_absence.py  <- metadata TSV (optional)
+                        11b_presence_absence.py  <- metadata TSV (optional)
                                         |
-              presence_absence_L{N}_{marker}.tsv   <- input to 05_run_diversity_stats.py
+              presence_absence_L{N}_{marker}.tsv   <- input to 08_run_diversity_stats.py
               detection_freq_{marker}.tsv
               detection_freq_by_{group}_{marker}.tsv
               detection_summary_{marker}.txt
@@ -86,7 +86,7 @@ OUTPUTS
 
   presence_absence_L{N}_{marker}.tsv
       Binary 0/1 table: taxa (rows) x samples (columns).
-      Direct input to 05_run_diversity_stats.py for Jaccard + PERMANOVA.
+      Direct input to 08_run_diversity_stats.py for Jaccard + PERMANOVA.
 
   detection_freq_{marker}.tsv
       Per-taxon detection frequency across all retained samples.
@@ -110,7 +110,7 @@ USAGE EXAMPLES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   # MiFish diet — group comparison, standard thresholds
-  python 08b_presence_absence.py \\
+  python 11b_presence_absence.py \\
       --counts            results/MiFish/all/taxonomy/taxonomy_counts_L7_MiFish.tsv \\
       --metadata          metadata/qiime/metadata_MiFish.tsv \\
       --marker            MiFish \\
@@ -125,7 +125,7 @@ USAGE EXAMPLES
   # At rarefaction depth 200, --min-sample-reads must be <= 200.
   # --min-relabund 0.01 requires >= 2 reads for a detection call at depth 200,
   # which is the practical minimum for distinguishing signal from noise.
-  python 08b_presence_absence.py \\
+  python 11b_presence_absence.py \\
       --counts            results/cytb/all/taxonomy/taxonomy_counts_L7_cytb.tsv \\
       --metadata          metadata/qiime/metadata_cytb.tsv \\
       --marker            cytb \\
@@ -137,7 +137,7 @@ USAGE EXAMPLES
       --outdir            results/cytb/all/presence_absence/
 
   # Blood meal tick study — original use case still fully supported
-  python 08b_presence_absence.py \\
+  python 11b_presence_absence.py \\
       --counts            results/COI/all/taxonomy/taxonomy_counts_L7_COI.tsv \\
       --metadata          metadata/qiime/metadata_COI.tsv \\
       --marker            COI \\
@@ -149,7 +149,7 @@ USAGE EXAMPLES
       --outdir            results/COI/all/presence_absence/
 
   # Dry run -- see what would happen without writing files
-  python 08b_presence_absence.py \\
+  python 11b_presence_absence.py \\
       --counts   results/cytb/all/taxonomy/taxonomy_counts_L7_cytb.tsv \\
       --marker   cytb \\
       --outdir   results/cytb/all/presence_absence/ \\
@@ -187,7 +187,7 @@ log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Style constants — kept in sync with 06_plot_diversity.py / 09_plot_taxonomy.py
+# Style constants — kept in sync with 09_plot_diversity.py / 10_plot_taxonomy.py
 # ---------------------------------------------------------------------------
 
 FIGURE_DPI       = 300
@@ -196,7 +196,7 @@ FONT_SIZE_AXIS   = 11
 FONT_SIZE_TICK   = 9
 FONT_SIZE_LEGEND = 8.5
 
-# Group colors: match 09_plot_taxonomy.py purple palette exactly
+# Group colors: match 10_plot_taxonomy.py purple palette exactly
 GROUP_COLORS = [
     "#7B2D8B",  # dark purple   — Group 1
     "#C19FD8",  # lavender      — Group 2
@@ -741,7 +741,7 @@ def run_presence_absence(
       frequencies -> write tables -> write summary -> write barplot.
 
     Args:
-        counts_tsv:        Count TSV from 08_taxonomy_table.py.
+        counts_tsv:        Count TSV from 07_taxonomy_table.py.
         marker:            Marker name (for output naming only, e.g. 'cytb').
         outdir:            Directory to write all outputs.
         metadata_path:     QIIME2 metadata TSV (required if group_by is set).
@@ -757,7 +757,7 @@ def run_presence_absence(
     """
     safe_mkdir(outdir)
 
-    log.info("=== 08b_presence_absence: %s ===", marker)
+    log.info("=== 11b_presence_absence: %s ===", marker)
     log.info("Input counts     : %s", counts_tsv)
     log.info("Output dir       : %s", outdir.resolve())
     log.info("Min sample reads : %d", min_sample_reads)
@@ -868,14 +868,14 @@ def run_presence_absence(
 
     log.info("")
     log.info(
-        "Next step — run Jaccard + PERMANOVA with 05_run_diversity_stats.py:\n"
-        "  python 05_run_diversity_stats.py \\\n"
+        "Next step — run Jaccard + PERMANOVA with 08_run_diversity_stats.py:\n"
+        "  python 08_run_diversity_stats.py \\\n"
         "    --marker       %s \\\n"
         "    --dataset      all \\\n"
         "    --metadata     metadata/qiime/metadata_%s.tsv \\\n"
         "    --metrics-dir  <your core-metrics directory> \\\n"
         "    --group-column <your grouping column>\n\n"
-        "  Note: 05_run_diversity_stats.py operates on QIIME2 core-metrics output.\n"
+        "  Note: 08_run_diversity_stats.py operates on QIIME2 core-metrics output.\n"
         "  The presence_absence TSV written here can be imported into R (vegan)\n"
         "  for Jaccard + PERMANOVA if preferred:\n\n"
         "    library(vegan)\n"
@@ -894,19 +894,19 @@ def run_presence_absence(
 
 def build_parser() -> argparse.ArgumentParser:
     """
-    Build and return the argument parser for 08b_presence_absence.py.
+    Build and return the argument parser for 11b_presence_absence.py.
 
-    Key arguments: --counts (TSV from 08_taxonomy_table.py), --marker,
+    Key arguments: --counts (TSV from 07_taxonomy_table.py), --marker,
     --outdir. Metadata and grouping are optional but required together.
     Filter thresholds have sensible defaults matching Zeb Antonioli's
     recommended approach for blood meal data.
     """
     p = argparse.ArgumentParser(
-        prog="08b_presence_absence.py",
+        prog="11b_presence_absence.py",
         description=(
             "Convert taxonomy count table to presence/absence and compute "
             "detection frequencies for amplicon metabarcoding data.\n"
-            "Designed to run after 08_taxonomy_table.py.\n"
+            "Designed to run after 07_taxonomy_table.py.\n"
             "See module docstring for full rationale and usage examples."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -916,7 +916,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--counts", required=True, type=Path,
         help=(
-            "Taxonomy count TSV from 08_taxonomy_table.py "
+            "Taxonomy count TSV from 07_taxonomy_table.py "
             "(e.g. taxonomy_counts_L7_cytb.tsv). "
             "Taxa as rows, samples as columns."
         ),

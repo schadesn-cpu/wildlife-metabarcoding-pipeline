@@ -158,7 +158,7 @@ PALETTES: Dict[str, Dict] = {
 # ---------------------------------------------------------------------------
 
 def load_relabund(path: Path) -> pd.DataFrame:
-    """Load taxonomy relative abundance TSV from 08_taxonomy_table.py output."""
+    """Load taxonomy relative abundance TSV from 07_taxonomy_table.py output."""
     df = pd.read_csv(path, sep="\t", index_col=0)
     if "mean_relabund" in df.columns:
         df = df.drop(columns=["mean_relabund"])
@@ -523,7 +523,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     req = p.add_argument_group("required arguments")
     req.add_argument("--relabund", required=True, type=Path,
-                     help="Taxonomy relative abundance TSV from 08_taxonomy_table.py.")
+                     help="Taxonomy relative abundance TSV from 07_taxonomy_table.py.")
     req.add_argument("--metadata", required=True, type=Path,
                      help="QIIME2 metadata TSV with Season and Group columns.")
 

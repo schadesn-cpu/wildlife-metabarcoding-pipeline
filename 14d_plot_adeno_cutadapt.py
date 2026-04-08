@@ -89,7 +89,7 @@ from scipy.stats import fisher_exact
 
 # ── Color palettes ─────────────────────────────────────────────────────────────
 # Wong (2011) colorblind-safe palette used throughout this project.
-# Color assignments follow the convention established in 06_plot_diversity.py:
+# Color assignments follow the convention established in 09_plot_diversity.py:
 #   DvT:  Diseased = blue (#0072B2), Trauma = orange (#E69F00)
 #   COD:  Lead = blue, Parasitic_Infectious = orange, Trauma = green
 WONG_COLORS = [
@@ -109,7 +109,7 @@ WONG_COLORS = [
 NON_PRIMER_COLOR = "#CCCCCC"
 
 # Purple used for significant Fisher's exact results, consistent with
-# PERMANOVA annotation color used in 06_plot_diversity.py.
+# PERMANOVA annotation color used in 09_plot_diversity.py.
 SIG_COLOR = "#6A0DAD"
 NS_COLOR = "#444444"
 

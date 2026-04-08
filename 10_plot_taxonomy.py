@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-09_plot_taxonomy.py
+10_plot_taxonomy.py
 ===================
 Generate publication-quality stacked taxonomy barplots from the relative
-abundance TSV produced by 08_taxonomy_table.py.
+abundance TSV produced by 07_taxonomy_table.py.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PIPELINE POSITION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  08_taxonomy_table.py  →  taxonomy_relabund_L{N}_{marker}.tsv
+  07_taxonomy_table.py  →  taxonomy_relabund_L{N}_{marker}.tsv
                                           ↓
-                          09_plot_taxonomy.py   ← metadata TSV
+                          10_plot_taxonomy.py   ← metadata TSV
                                           ↓
                           barplot_{marker}_{group}_{palette}.png/.svg
 
@@ -32,7 +32,7 @@ Methods note: "Relative abundance was calculated among reads assigned at
 [level] level following [database] classification."
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PALETTES — kept in sync with 06_plot_diversity.py and 07_visualize_diversity.py
+PALETTES — kept in sync with 09_plot_diversity.py and 09c_visualize_diversity.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   --palette purple   Dark-to-light purple gradient for taxa bars.
@@ -51,7 +51,7 @@ USAGE EXAMPLES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   # 16S Diseased vs Trauma, purple palette
-  python 09_plot_taxonomy.py \\
+  python 10_plot_taxonomy.py \\
       --relabund  results/16S/DvT/taxonomy/taxonomy_relabund_L6_16S.tsv \\
       --metadata  metadata/qiime/metadata_16S.tsv \\
       --group-by  Group \\
@@ -60,7 +60,7 @@ USAGE EXAMPLES
       --outdir    results/16S/DvT/figures/taxonomy/
 
   # Same data, red-blue palette
-  python 09_plot_taxonomy.py \\
+  python 10_plot_taxonomy.py \\
       --relabund  results/16S/DvT/taxonomy/taxonomy_relabund_L6_16S.tsv \\
       --metadata  metadata/qiime/metadata_16S.tsv \\
       --group-by  Group \\
@@ -69,7 +69,7 @@ USAGE EXAMPLES
       --outdir    results/16S/DvT/figures/taxonomy/
 
   # Seasonal grouping, explicit order, top 20 taxa
-  python 09_plot_taxonomy.py \\
+  python 10_plot_taxonomy.py \\
       --relabund    results/16S/DvT/taxonomy/taxonomy_relabund_L6_16S.tsv \\
       --metadata    metadata/qiime/metadata_16S.tsv \\
       --group-by    Season \\
@@ -80,7 +80,7 @@ USAGE EXAMPLES
       --outdir      results/16S/DvT/figures/taxonomy/
 
   # MiFish species level
-  python 09_plot_taxonomy.py \\
+  python 10_plot_taxonomy.py \\
       --relabund  results/MiFish/all/taxonomy/taxonomy_relabund_L7_MiFish.tsv \\
       --metadata  metadata/qiime/metadata_MiFish.tsv \\
       --group-by  Group \\
@@ -89,7 +89,7 @@ USAGE EXAMPLES
       --outdir    results/MiFish/all/figures/taxonomy/
 
   # List metadata columns available for --group-by
-  python 09_plot_taxonomy.py \\
+  python 10_plot_taxonomy.py \\
       --relabund  results/16S/DvT/taxonomy/taxonomy_relabund_L6_16S.tsv \\
       --metadata  metadata/qiime/metadata_16S.tsv \\
       --list-columns
@@ -136,7 +136,7 @@ FONT_SIZE_GROUP  = 11
 # Palettes
 # ---------------------------------------------------------------------------
 # Group colors: used for group header labels above bars.
-# Kept in sync with 06_plot_diversity.py and 07_visualize_diversity.py.
+# Kept in sync with 09_plot_diversity.py and 09c_visualize_diversity.py.
 #
 # Taxa colors: used for the stacked bar segments.
 # 16-step gradients ensure visual separation for up to 15 named taxa + Other.
@@ -331,7 +331,7 @@ def match_samples(
 
 def load_relabund(tsv_path: Path) -> pd.DataFrame:
     """
-    Load a taxonomy_relabund_*.tsv produced by 08_taxonomy_table.py.
+    Load a taxonomy_relabund_*.tsv produced by 07_taxonomy_table.py.
     Returns DataFrame: taxa (rows) × samples (cols), values 0–1.
     """
     df = pd.read_csv(tsv_path, sep="\t", index_col=0)
@@ -614,17 +614,17 @@ def plot_barplot(
 
 def build_parser() -> argparse.ArgumentParser:
     """
-Build and return the argument parser for 09_plot_taxonomy.py.
+Build and return the argument parser for 10_plot_taxonomy.py.
 
-    Key arguments: --relabund (TSV from 08_taxonomy_table.py), --marker,
+    Key arguments: --relabund (TSV from 07_taxonomy_table.py), --marker,
     --group-by (metadata column), --palette, --top-n, --outdir.
     A --list-columns flag is also available to inspect available metadata
     columns without producing any figures.
     """
     p = argparse.ArgumentParser(
-        prog="09_plot_taxonomy.py",
+        prog="10_plot_taxonomy.py",
         description=(
-            "Generate stacked taxonomy barplots from 08_taxonomy_table.py output.\n"
+            "Generate stacked taxonomy barplots from 07_taxonomy_table.py output.\n"
             "Produces PNG (300 dpi) and SVG per group × palette combination."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -635,7 +635,7 @@ Build and return the argument parser for 09_plot_taxonomy.py.
     req.add_argument(
         "--relabund", required=True, type=Path,
         help=(
-            "Relative abundance TSV produced by 08_taxonomy_table.py "
+            "Relative abundance TSV produced by 07_taxonomy_table.py "
             "(taxonomy_relabund_L{N}_{marker}.tsv). "
             "Rows = taxa, columns = samples, values = 0–1."
         ),
@@ -725,7 +725,7 @@ def main(argv=None) -> int:
     """
 Parse arguments and generate stacked taxonomy barplots.
 
-    Reads the relative abundance TSV produced by 08_taxonomy_table.py, groups
+    Reads the relative abundance TSV produced by 07_taxonomy_table.py, groups
     samples by the specified metadata column, collapses low-abundance taxa into
     'Other', and writes one PNG (300 dpi) + SVG pair per palette to --outdir.
     Returns 0 on success, 2 if required input files are missing, 1 on error.

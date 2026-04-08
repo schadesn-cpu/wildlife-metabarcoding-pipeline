@@ -55,10 +55,10 @@ called "detected" at 10% relative abundance, while a sample with 10,000
 reads and 99 no-hit reads is called "not detected" at 0.99%. The relative
 abundance threshold is only meaningful when applied to samples with
 sufficient read depth. This filter is applied before any detection
-calling, matching the approach used in 08b_presence_absence.py.
+calling, matching the approach used in 11b_presence_absence.py.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PALETTES — kept in sync with 06_plot_diversity.py and 09_plot_taxonomy.py
+PALETTES — kept in sync with 09_plot_diversity.py and 10_plot_taxonomy.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   --palette purple   Dark-to-light purple for group bars; grey for classified.
@@ -167,7 +167,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Constants — kept in sync with 06_plot_diversity.py and 09_plot_taxonomy.py
+# Constants — kept in sync with 09_plot_diversity.py and 10_plot_taxonomy.py
 # ---------------------------------------------------------------------------
 
 FIGURE_DPI        = 300
@@ -183,7 +183,7 @@ NO_HIT_TAG = "no-hit"
 TV_REGEX   = r"(TV\d+)"
 
 # ---------------------------------------------------------------------------
-# Palettes — identical structure to 09_plot_taxonomy.py
+# Palettes — identical structure to 10_plot_taxonomy.py
 # ---------------------------------------------------------------------------
 
 PALETTES: Dict[str, Dict] = {
@@ -312,7 +312,7 @@ def filter_low_depth_samples(
     sample with 10 reads and 1 no-hit read registers 10% no-hit relabund
     and is called 'detected' under the default 1% threshold, even though
     1 read is not meaningful evidence. This filter mirrors the approach in
-    08b_presence_absence.py and should always be applied before threshold-
+    11b_presence_absence.py and should always be applied before threshold-
     based detection.
 
     Returns the filtered DataFrame and logs dropped sample IDs.

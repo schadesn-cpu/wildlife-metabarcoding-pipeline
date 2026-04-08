@@ -11,7 +11,7 @@
 # Jobs submitted (in order, with dependencies):
 #   1. classify   — UNITE classifier against ITS rep-seqs (~30-60 min)
 #   2. tabulate   — taxonomy visualization QZV (~2 min)
-#   3. taxtable   — 08_taxonomy_table.py → TSV count table (~5 min)
+#   3. taxtable   — 07_taxonomy_table.py → TSV count table (~5 min)
 #   4. diversity  — core-metrics-non-phylogenetic (~10 min)
 #
 # Adapting for other markers:
@@ -149,7 +149,7 @@ echo "Submitting Job 2: tabulate (after job ${JID1})..."
 JID2=$(submit "${MARKER}_tabulate" "${JID1}" "${TABULATE_SCRIPT}")
 echo "  Job 2 ID: ${JID2}"
 
-# ── Job 3: Taxonomy table (TSV count table via 08_taxonomy_table.py) ──────────
+# ── Job 3: Taxonomy table (TSV count table via 07_taxonomy_table.py) ──────────
 TAXTABLE_SCRIPT="#!/bin/bash
 #SBATCH --job-name=${MARKER}_taxtable
 #SBATCH --partition=${PARTITION}
@@ -169,7 +169,7 @@ cd ${PROJECT}
 echo \"=== ${MARKER} taxonomy table ===\"
 echo \"Start: \$(date)\"
 
-python scripts/08_taxonomy_table.py \\
+python scripts/07_taxonomy_table.py \\
     --taxonomy  ${TAXONOMY_OUT} \\
     --table     ${TABLE} \\
     --marker    ITS \\

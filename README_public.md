@@ -41,7 +41,7 @@ omnivores with dietary fungal components, but not for fish-eating birds.
 If you attempt ITS, run `parse_dada2_retention.py` before proceeding and
 check NTC read counts carefully.
 
-Adding a new marker requires one configuration block in `03_run_full_metabarcoding_pipeline.py`
+Adding a new marker requires one configuration block in `05_run_full_metabarcoding_pipeline.py`
 and a reference database in QIIME2 format. See [Adding a new marker](#adding-a-new-marker).
 
 ---
@@ -117,14 +117,14 @@ single 12S or cytb amplification to identify vertebrate host.
 - Rarefaction depth is very low (often 200-500 reads per tick)
 - Many samples will fail the minimum read threshold — plan for high dropout rate
 - Exclude tick mitochondrial sequences as host reads (add tick sequences to
-  classifier or use `--exclude Acari` in `08_taxonomy_table.py`)
+  classifier or use `--exclude Acari` in `07_taxonomy_table.py`)
 - Classifier confidence threshold matters more here than in dietary studies —
   use `--p-confidence 0.8` or higher in `classify-sklearn`
 
 **Configuration changes from loon default:**
 ```bash
-# 08_taxonomy_table.py for tick blood meal (cytb):
-python scripts/08_taxonomy_table.py \
+# 07_taxonomy_table.py for tick blood meal (cytb):
+python scripts/07_taxonomy_table.py \
     --taxonomy  qiime2/cytb/tick/taxonomy/taxonomy.qza \
     --table     qiime2/cytb/tick/dada2/table.qza \
     --marker    cytb \
@@ -132,7 +132,7 @@ python scripts/08_taxonomy_table.py \
     --exclude   Acari,Arachnida,Bacteria,Viruses,Archaea \
     --outdir    results/cytb/tick/taxonomy/
 
-# No 09b_clean_diet_table.py or 08b_presence_absence.py needed
+# No 11_clean_diet_table.py or 11b_presence_absence.py needed
 # Report top classification per sample directly from taxonomy_counts TSV
 ```
 
@@ -154,7 +154,7 @@ MiFish 12S + cytb, aiming to characterise diet of a generalist carnivore.
   (squirrels, voles, rabbits, grouse) are not fish and MiFish will not amplify
   them. Use cytb as primary dietary marker, MiFish as secondary.
 - Fisher host DNA must be excluded: add Mustelidae to host filter in
-  `09b_clean_diet_table.py`. For cytb this requires adding `Mustelidae` to
+  `11_clean_diet_table.py`. For cytb this requires adding `Mustelidae` to
   `HOST_TAXON_STRINGS` in the script (currently set for Gaviidae/Aves).
 - Artefact taxa for terrestrial study: Canidae and Bovidae are still domestic
   contamination. Cervidae and Leporidae are real prey — do NOT remove them.
@@ -232,7 +232,7 @@ wget -O classifiers/unite-ver10-99-nb-classifier.qza \
   "https://github.com/colinbrislawn/unite-train/releases/download/v10.0-v04.04.2024-qiime2-2024.5/unite_ver10_dynamic_all_04.04.2024-Q2-2024.5.qza"
 
 # MiFish (12S fish) — build from MitoFish database
-# See 00_build_classifiers.py for instructions
+# See 01_build_classifiers.py for instructions
 # Optionally add host sequences to exclude host reads at classification stage
 ```
 
@@ -258,7 +258,7 @@ Always verify season is independent of your primary grouping variable using
 chi-square before reporting seasonal results.
 | collection site | For confound checking | Lake Umbagog, NH |
 
-The script `02_make_qiime_metadata.py` builds a QIIME2-ready TSV from your
+The script `04_make_qiime_metadata.py` builds a QIIME2-ready TSV from your
 source metadata by matching sample IDs between your metadata file and the
 QIIME2 feature table.
 
@@ -275,7 +275,7 @@ reads/
 │   └── ...
 ```
 
-If reads come from multiple sequencing runs, use `00_merge_run_dirs.py` first.
+If reads come from multiple sequencing runs, use `02_merge_run_dirs.py` first.
 
 ---
 
@@ -283,7 +283,7 @@ If reads come from multiple sequencing runs, use `00_merge_run_dirs.py` first.
 
 ### Four things you must change
 
-**1. Marker names and primer sequences** — in `03_run_full_metabarcoding_pipeline.py`:
+**1. Marker names and primer sequences** — in `05_run_full_metabarcoding_pipeline.py`:
 ```python
 MARKERS = {
     "MiFish": {
@@ -297,12 +297,12 @@ MARKERS = {
 }
 ```
 
-**2. Rarefaction depth** — in `04_rarefaction.py` and diversity commands.
+**2. Rarefaction depth** — in `06_rarefaction.py` and diversity commands.
 Choose a depth that retains ≥70% of your samples. Check the rarefaction
 curve before committing. For low-biomass samples (tick, museum specimens),
 acceptable depths may be 200-500 reads.
 
-**3. Taxonomy filter strings** — in `08_taxonomy_table.py`.
+**3. Taxonomy filter strings** — in `07_taxonomy_table.py`.
 The `--include` and `--exclude` flags depend on your reference database format.
 SILVA uses plain NCBI-style strings ("Bacteria", "Eukaryota").
 UNITE uses plain strings ("Fungi"). Custom cytb databases built from NCBI
@@ -311,7 +311,7 @@ may use Greengenes-style k__/p__ prefixes — check with:
 unzip -p your_taxonomy.qza "*/data/taxonomy.tsv" | head -5
 ```
 
-**4. Detection thresholds** — in `08b_presence_absence.py`.
+**4. Detection thresholds** — in `11b_presence_absence.py`.
 ```
 --min-sample-reads: minimum total reads to include a sample (default: 10000)
 --min-taxon-reads:  minimum reads for a taxon to count as detected (default: 10)
@@ -322,7 +322,7 @@ Higher thresholds for noisy markers or low-quality extractions.
 
 ### Adapting the host filter
 
-The `09b_clean_diet_table.py` script filters host reads using family-level
+The `11_clean_diet_table.py` script filters host reads using family-level
 strings. The default is set for loon (Gaviidae). Change `HOST_TAXON_STRINGS`
 in the script for your study organism:
 
@@ -347,18 +347,18 @@ HOST_TAXON_STRINGS = {
 
 ## Adding a new marker
 
-1. Add primer sequences and DADA2 parameters to `03_run_full_metabarcoding_pipeline.py`
-2. Add the marker's classifier path to `00_build_classifiers.py` or download pre-built
-3. Create a metadata TSV for the marker using `02_make_qiime_metadata.py`
-4. Run the full pipeline via `03_run_full_metabarcoding_pipeline.py --marker YOURMARKER`
-5. Choose rarefaction depth from `04_rarefaction.py` output
-6. Run diversity stats via `05_run_diversity_stats.py`
-7. Run taxonomy table via `08_taxonomy_table.py` with appropriate `--include/--exclude`
+1. Add primer sequences and DADA2 parameters to `05_run_full_metabarcoding_pipeline.py`
+2. Add the marker's classifier path to `01_build_classifiers.py` or download pre-built
+3. Create a metadata TSV for the marker using `04_make_qiime_metadata.py`
+4. Run the full pipeline via `05_run_full_metabarcoding_pipeline.py --marker YOURMARKER`
+5. Choose rarefaction depth from `06_rarefaction.py` output
+6. Run diversity stats via `08_run_diversity_stats.py`
+7. Run taxonomy table via `07_taxonomy_table.py` with appropriate `--include/--exclude`
 7b. **Optional BLAST verification** — run `08c_blast_verify.py` on suspect taxa
    (ecologically implausible, low classifier confidence, or high read counts
    with unresolved taxonomy). Requires local NCBI nt database or NCBI remote
-   access. Updates artefact exclusion list in `09b_clean_diet_table.py`.
-8. If dietary marker: run `09b_clean_diet_table.py` → `08b_presence_absence.py` →
+   access. Updates artefact exclusion list in `11_clean_diet_table.py`.
+8. If dietary marker: run `11_clean_diet_table.py` → `11b_presence_absence.py` →
    `10b_annotate_diet_ecology.py`
 9. Add the marker to `run_all_figures.sh` for the diversity figure generation block
 
@@ -372,7 +372,7 @@ project_root/
 ├── classifiers/                  ← QIIME2 classifier QZAs
 ├── metadata/
 │   ├── full_metadata_{study}.csv ← your source-of-truth metadata
-│   └── qiime/                   ← QIIME2-ready TSVs (built by 02_make_qiime_metadata.py)
+│   └── qiime/                   ← QIIME2-ready TSVs (built by 04_make_qiime_metadata.py)
 ├── qiime2/                       ← QIIME2 artifacts (.qza/.qzv)
 │   └── {marker}/all/
 │       ├── dada2/               ← table.qza, rep-seqs.qza
@@ -405,21 +405,21 @@ project_root/
 |---|---|---|---|
 | `utils/primer_advisor.py` | Pre-DADA2 QC | Raw FASTQs | primers_detected.tsv |
 | `utils/parse_multiqc_demux.py` | Demux QC report | Illumina demux + MultiQC | demux_qc_report.txt |
-| `00_build_classifiers.py` | Build/train classifiers | Reference FASTA + taxonomy | classifier.qza |
-| `01_make_manifests.py` | FASTQ manifests | reads/ directory | manifest_{marker}.tsv |
-| `02_make_qiime_metadata.py` | QIIME2 metadata | Source CSV + feature table | metadata_{marker}.tsv |
+| `01_build_classifiers.py` | Build/train classifiers | Reference FASTA + taxonomy | classifier.qza |
+| `03_make_manifests.py` | FASTQ manifests | reads/ directory | manifest_{marker}.tsv |
+| `04_make_qiime_metadata.py` | QIIME2 metadata | Source CSV + feature table | metadata_{marker}.tsv |
 | `02b_add_season_to_metadata.py` | Add Season column | Metadata TSV | Updated metadata TSV |
-| `03_run_full_metabarcoding_pipeline.py` | Import → DADA2 → taxonomy | Reads + classifier | QIIME2 artifacts |
-| `04_rarefaction.py` | Choose rarefaction depth | Feature table | Rarefaction curves |
-| `05_run_diversity_stats.py` | PERMANOVA + alpha stats | Core-metrics + metadata | Stats QZVs |
+| `05_run_full_metabarcoding_pipeline.py` | Import → DADA2 → taxonomy | Reads + classifier | QIIME2 artifacts |
+| `06_rarefaction.py` | Choose rarefaction depth | Feature table | Rarefaction curves |
+| `08_run_diversity_stats.py` | PERMANOVA + alpha stats | Core-metrics + metadata | Stats QZVs |
 | `05b_run_cod_diversity.py` | COD-filtered diversity | Core-metrics + COD metadata | Stats QZVs |
 | `05c_parse_beta_stats.py` | Parse QZV stats | Results directory | Summary TSV |
-| `08_taxonomy_table.py` | Taxonomy count table | Taxonomy + table QZAs | Count TSV |
-| `09b_clean_diet_table.py` | Remove host/artefacts | Count TSV | Cleaned TSV |
-| `08b_presence_absence.py` | Detection analysis | Cleaned TSV + metadata | Binary table + barplot |
+| `07_taxonomy_table.py` | Taxonomy count table | Taxonomy + table QZAs | Count TSV |
+| `11_clean_diet_table.py` | Remove host/artefacts | Count TSV | Cleaned TSV |
+| `11b_presence_absence.py` | Detection analysis | Cleaned TSV + metadata | Binary table + barplot |
 | `10b_annotate_diet_ecology.py` | Ecological annotations | Cleaned TSV | Annotated TSV |
-| `06_plot_diversity.py` | PCoA + alpha figures | Core-metrics QZAs | PNG + SVG figures |
-| `09_plot_taxonomy.py` | Taxonomy barplots | Relabund TSV | PNG + SVG figures |
+| `09_plot_diversity.py` | PCoA + alpha figures | Core-metrics QZAs | PNG + SVG figures |
+| `10_plot_taxonomy.py` | Taxonomy barplots | Relabund TSV | PNG + SVG figures |
 | `11_plot_mifish_season_ecology.py` | Seasonal diet figure | PA table + metadata | PNG + SVG |
 | `10_plot_viral.py` | Viral detection figures | Excel workbook | PNG + SVG figures |
 | `14_viral_stats.py` | Viral Fisher's exact | Excel + metadata | Stats TSV |

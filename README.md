@@ -152,12 +152,12 @@ project_root/
     ├── 02_make_qiime_metadata.py
     ├── 03_run_full_metabarcoding_pipeline.py
     ├── 04_rarefaction.py
-    ├── 05_run_diversity_stats.py
+    ├── 08_run_diversity_stats.py
     ├── 05b_run_cod_diversity.py               ← (fixed: sys.executable + relative path)
-    ├── 06_plot_diversity.py                   ← (fixed: PERMANOVA parser no longer silent)
-    ├── 08_taxonomy_table.py
-    ├── 08b_presence_absence.py                ← universal PA; use for MiFish + cytb
-    ├── 09_plot_taxonomy.py
+    ├── 09_plot_diversity.py                   ← (fixed: PERMANOVA parser no longer silent)
+    ├── 07_taxonomy_table.py
+    ├── 11b_presence_absence.py                ← universal PA; use for MiFish + cytb
+    ├── 10_plot_taxonomy.py
     ├── 10_plot_viral.py
     ├── 11_plot_mifish_season_ecology.py
     ├── add_season_to_metadata.py              ← (fixed: bad dates now logged with sample ID)
@@ -167,7 +167,7 @@ project_root/
     ├── run_all_figures.sh
     ├── scan_files.py                          ← (fixed: PermissionError now logged)
     └── _archive/
-        ├── 07_visualize_diversity.py          ← retired; superseded by 06_plot_diversity.py
+        ├── 09c_visualize_diversity.py          ← retired; superseded by 09_plot_diversity.py
         ├── combine_multimarker_alpha.py       ← retired; use 06_ --panel instead
         ├── parse_demux_report.py              ← retired; absorbed into primer_advisor check
         ├── reorganize_loon.sh                 ← one-time migration, complete
@@ -220,13 +220,13 @@ Note: amplicon lengths in parse_multiqc_demux.py are loon-project-specific defau
 
 ## Presence/Absence Analysis (MiFish and cytb)
 
-`08b_presence_absence.py` converts taxonomy count tables to binary presence/absence
+`11b_presence_absence.py` converts taxonomy count tables to binary presence/absence
 and computes detection frequencies per group. Use this — not relative abundance — for
 MiFish and cytb results.
 
 ```bash
 # MiFish
-nohup python scripts/08b_presence_absence.py \
+nohup python scripts/11b_presence_absence.py \
     --counts            results/MiFish/all/taxonomy/taxonomy_counts_L7_MiFish.tsv \
     --metadata          metadata/qiime/metadata_MiFish.tsv \
     --marker            MiFish \
@@ -240,7 +240,7 @@ nohup python scripts/08b_presence_absence.py \
 
 # cytb — thresholds set to match rarefaction depth of 200 reads
 # --min-relabund 0.01 requires >=2 reads for a detection call at this depth
-nohup python scripts/08b_presence_absence.py \
+nohup python scripts/11b_presence_absence.py \
     --counts            results/cytb/all/taxonomy/notrim/taxonomy_counts_L7_cytb.tsv \
     --metadata          metadata/qiime/metadata_cytb.tsv \
     --marker            cytb \
@@ -310,7 +310,7 @@ Viral figures: `herpes_{type}_{palette}.png/svg`, `adeno_{type}_{palette}.png/sv
 | Jaccard | 1.577 | **0.002*** |
 
 ⚠ MiFish diversity stats above are from rarefied relative abundance analysis.
-Presence/absence (Jaccard on binary table) will be rerun via 08b and 05_run_diversity_stats.py.
+Presence/absence (Jaccard on binary table) will be rerun via 08b and 08_run_diversity_stats.py.
 These p-values may change slightly — update this table when complete.
 
 ### MiFish Alpha (DvT)
@@ -380,7 +380,7 @@ Presence/absence rerun pending — update when complete.
 ## Pending Tasks
 
 **Blocking manuscript:**
-- [ ] Run 08b_presence_absence.py for MiFish and cytb — generate detection_freq TSVs and
+- [ ] Run 11b_presence_absence.py for MiFish and cytb — generate detection_freq TSVs and
       binary presence/absence tables (commands above)
 - [ ] Rerun Jaccard PERMANOVA on binary presence/absence table for MiFish and cytb —
       update stats tables above with new p-values
@@ -408,7 +408,7 @@ Presence/absence rerun pending — update when complete.
 - [x] Analytical decision: MiFish and cytb → presence/absence (Deagle et al. 2019)
 - [x] 18S exclusion confirmed — 0%/0% primer detection in primers_detected.tsv
 - [x] parse_multiqc_demux.py written — reads Illumina demux + MultiQC data directly
-- [x] 08b_presence_absence.py made universal — added --sample-label, removed dead code,
+- [x] 11b_presence_absence.py made universal — added --sample-label, removed dead code,
       renamed project-specific defaults
 - [x] primer_advisor.py updated — added check subcommand for post-cutadapt QC
 - [x] Bug fixes: 06_plot_diversity (silent except), 07_visualize_diversity (dead branch),
@@ -463,7 +463,7 @@ python scripts/10_plot_viral.py \
 
 ### Regenerate a single marker/dataset figure
 ```bash
-python scripts/06_plot_diversity.py pcoa \
+python scripts/09_plot_diversity.py pcoa \
     --artifact qiime2/MiFish/rarefied_17000/DvT/diversity/core-metrics-17000/bray_curtis_pcoa_results.qza \
                qiime2/MiFish/rarefied_17000/DvT/diversity/core-metrics-17000/jaccard_pcoa_results.qza \
     --metadata metadata/qiime/metadata_MiFish.tsv \
@@ -476,7 +476,7 @@ python scripts/06_plot_diversity.py pcoa \
 ### Taxonomy table (16S — flat structure, V4 classifier)
 ```bash
 conda activate metabarcoding-analysis
-python scripts/08_taxonomy_table.py \
+python scripts/07_taxonomy_table.py \
     --taxonomy  qiime2/taxonomy/taxonomy_16S_silva138_v4.qza \
     --table     qiime2/dada2/table_16S.qza \
     --marker    16S \

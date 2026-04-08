@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-05_run_diversity_stats.py
+08_run_diversity_stats.py
 
 Run alpha and beta diversity group-significance tests on any existing
 QIIME2 core-metrics output directory.
@@ -252,9 +252,9 @@ def run_stats(
 # ---------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build and return the argument parser for 05_run_diversity_stats.py."""
+    """Build and return the argument parser for 08_run_diversity_stats.py."""
     p = argparse.ArgumentParser(
-        prog="05_run_diversity_stats.py",
+        prog="08_run_diversity_stats.py",
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

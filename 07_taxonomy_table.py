@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-08_taxonomy_table.py
+07_taxonomy_table.py
 ====================
 Export taxonomy classifications to human-readable TSV tables for any marker
 in the metabarcoding pipeline.
@@ -45,21 +45,21 @@ Outputs (all in --outdir):
 Usage examples:
 
   # 16S — genus level, auto bacteria filter
-  python 08_taxonomy_table.py \\
+  python 07_taxonomy_table.py \\
       --taxonomy  qiime2/taxonomy/taxonomy_16S_silva138.qza \\
       --table     qiime2/dada2/table_16S_DvT.qza \\
       --marker    16S \\
       --outdir    results/16S/DvT/taxonomy/
 
   # MiFish — species level, auto Vertebrata filter
-  python 08_taxonomy_table.py \\
+  python 07_taxonomy_table.py \\
       --taxonomy  qiime2/MiFish/all/taxonomy/taxonomy.qza \\
       --table     qiime2/MiFish/all/dada2/table_filtered.qza \\
       --marker    MiFish \\
       --outdir    results/MiFish/all/taxonomy/
 
   # ITS — family level (override default genus), Fungi only
-  python 08_taxonomy_table.py \\
+  python 07_taxonomy_table.py \\
       --taxonomy  qiime2/taxonomy/taxonomy_ITS.qza \\
       --table     qiime2/dada2/table_ITS.qza \\
       --marker    ITS \\
@@ -67,7 +67,7 @@ Usage examples:
       --outdir    results/ITS/all/taxonomy/
 
   # Override auto-filters completely
-  python 08_taxonomy_table.py \\
+  python 07_taxonomy_table.py \\
       --taxonomy  qiime2/taxonomy/taxonomy_COI.qza \\
       --table     qiime2/dada2/table_COI.qza \\
       --marker    COI \\
@@ -76,7 +76,7 @@ Usage examples:
       --outdir    results/COI/all/taxonomy/
 
   # Dry run — see what would happen without writing files
-  python 08_taxonomy_table.py \\
+  python 07_taxonomy_table.py \\
       --taxonomy  qiime2/taxonomy/taxonomy_16S_silva138.qza \\
       --table     qiime2/dada2/table_16S_DvT.qza \\
       --marker    16S \\
@@ -617,7 +617,7 @@ Build and write taxonomy summary TSVs from QIIME2 taxonomy and feature table QZA
     effective_level = level if level is not None else cfg["default_level"]
     level_name = cfg["level_names"][effective_level - 1]
 
-    log.info("=== 08_taxonomy_table: %s — %s ===", marker, cfg["description"])
+    log.info("=== 07_taxonomy_table: %s — %s ===", marker, cfg["description"])
     log.info("Collapse level  : %d (%s)", effective_level, level_name)
     log.info("Top-N taxa      : %d", top_n)
     log.info("Min sample reads: %d (drop samples below this after filtering)", min_sample_reads)
@@ -724,7 +724,7 @@ Build and write taxonomy summary TSVs from QIIME2 taxonomy and feature table QZA
 
 def build_parser() -> argparse.ArgumentParser:
     """
-Build and return the argument parser for 08_taxonomy_table.py.
+Build and return the argument parser for 07_taxonomy_table.py.
 
     Key arguments: --taxonomy (QZA), --table (QZA), --marker, --outdir.
     Marker-aware defaults for taxonomic level, include/exclude filters, and
@@ -732,7 +732,7 @@ Build and return the argument parser for 08_taxonomy_table.py.
     See module docstring for full rationale and usage examples.
     """
     p = argparse.ArgumentParser(
-        prog="08_taxonomy_table.py",
+        prog="07_taxonomy_table.py",
         description=(
             "Export QIIME 2 taxonomy to TSV tables for barplotting.\n"
             "Uses unrarefied counts + marker-aware filters + relative abundance.\n"
@@ -837,8 +837,8 @@ Parse arguments and run build_taxonomy_tables for the requested marker.
 
     log.info("=== Done ===")
     log.info(
-        "\nNext step — generate barplots with 09_plot_taxonomy.py:\n"
-        "  python 09_plot_taxonomy.py \\\n"
+        "\nNext step — generate barplots with 10_plot_taxonomy.py:\n"
+        "  python 10_plot_taxonomy.py \\\n"
         "    --relabund  %s/taxonomy_relabund_L*_%s.tsv \\\n"
         "    --metadata  metadata/qiime/metadata_%s.tsv \\\n"
         "    --group-by  Group \\\n"

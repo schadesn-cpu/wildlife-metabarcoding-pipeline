@@ -7,7 +7,7 @@ table against a local or remote NCBI nt database.
 
 This script fills the gap between classifier-assigned taxonomy (which can
 misassign taxa with limited reference coverage) and a curated, clean diet
-table. Run it after 08_taxonomy_table.py and before 09b_clean_diet_table.py
+table. Run it after 07_taxonomy_table.py and before 11_clean_diet_table.py
 when you have:
 
   - Taxa that are ecologically unexpected (tropical species in New England)
@@ -183,7 +183,7 @@ def find_target_asvs(
     Returns a dict of {feature_id: (taxon_string, total_reads)}.
 
     Args:
-        counts_tsv:      Path to the taxonomy counts TSV from 08_taxonomy_table.py
+        counts_tsv:      Path to the taxonomy counts TSV from 07_taxonomy_table.py
         taxonomy_df:     DataFrame from exported taxonomy.tsv (feature_id -> Taxon)
         taxa_patterns:   List of substrings to match against taxon strings
         min_reads:       Include any taxon with total reads >= this threshold
@@ -520,7 +520,7 @@ def build_parser() -> argparse.ArgumentParser:
     req.add_argument("--rep-seqs",  required=True, type=Path,
                      help="QIIME2 rep-seqs.qza artifact (DADA2 output)")
     req.add_argument("--counts",    required=True, type=Path,
-                     help="Taxonomy counts TSV from 08_taxonomy_table.py")
+                     help="Taxonomy counts TSV from 07_taxonomy_table.py")
     req.add_argument("--marker",    required=True,
                      help="Marker name for output labeling (e.g. MiFish, cytb)")
     req.add_argument("--outdir",    required=True, type=Path,

@@ -233,7 +233,7 @@ cp_fig \
 echo "  ⚠   FigS9_16S_season_barplot — NEEDS REGENERATION"
 echo "      Current file has wrong meteorological season labels." \
     > "${OUT}/FigS9_16S_season_barplot_REGENERATE_NEEDED.txt"
-echo "      Run: 09_plot_taxonomy.py with --season-column Season" \
+echo "      Run: 10_plot_taxonomy.py with --season-column Season" \
     >> "${OUT}/FigS9_16S_season_barplot_REGENERATE_NEEDED.txt"
 echo "      Expected output: Breeding / Freshwater_Nonbreeding / Saltwater labels" \
     >> "${OUT}/FigS9_16S_season_barplot_REGENERATE_NEEDED.txt"

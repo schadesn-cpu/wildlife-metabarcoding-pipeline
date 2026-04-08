@@ -1458,7 +1458,7 @@ Entry point for 03_run_full_metabarcoding_pipeline.py.
         elif "taxonomy" in str(subcommand).lower():
             log.info(
                 "\nNext step — generate taxonomy tables and barplots:\n"
-                "  python 08_taxonomy_table.py \\\n"
+                "  python 07_taxonomy_table.py \\\n"
                 "    --taxonomy qiime2/<MARKER>/taxonomy/taxonomy.qza \\\n"
                 "    --table    qiime2/<MARKER>/dada2/table.qza \\\n"
                 "    --marker   <MARKER> \\\n"
@@ -1467,7 +1467,7 @@ Entry point for 03_run_full_metabarcoding_pipeline.py.
         elif "diversity" in str(subcommand).lower():
             log.info(
                 "\nNext step — taxonomy barplots:\n"
-                "  python 08_taxonomy_table.py \\\n"
+                "  python 07_taxonomy_table.py \\\n"
                 "    --taxonomy qiime2/<MARKER>/taxonomy/taxonomy.qza \\\n"
                 "    --table    qiime2/<MARKER>/dada2/table.qza \\\n"
                 "    --marker   <MARKER> \\\n"

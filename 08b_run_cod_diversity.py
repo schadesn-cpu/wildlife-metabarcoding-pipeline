@@ -3,7 +3,7 @@
 05b_run_cod_diversity.py
 
 Run diversity group-significance tests stratified by cause-of-death (COD)
-category and collection source. Designed to run after 05_run_diversity_stats.py
+category and collection source. Designed to run after 08_run_diversity_stats.py
 using the same core-metrics directories and updated metadata TSVs.
 
 Produces:
@@ -74,7 +74,7 @@ from pathlib import Path
 from typing import List, Optional
 
 # ---------------------------------------------------------------------------
-# Logging — identical setup to 05_run_diversity_stats.py
+# Logging — identical setup to 08_run_diversity_stats.py
 # ---------------------------------------------------------------------------
 
 logging.basicConfig(
@@ -86,7 +86,7 @@ log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Utilities — identical to 05_run_diversity_stats.py
+# Utilities — identical to 08_run_diversity_stats.py
 # ---------------------------------------------------------------------------
 
 def eprint(*args, **kwargs):
@@ -280,7 +280,7 @@ def run_cod_figures(
     """
 Generate PCoA and alpha diversity figures coloured by COD_broad.
 
-    Calls 06_plot_diversity.py as a subprocess for both purple and wong
+    Calls 09_plot_diversity.py as a subprocess for both purple and wong
     palettes. Skips if the metrics directory does not exist. Output files
     follow the naming convention {marker}_r{depth}_cod_{type}_{palette}.png/svg.
     """
@@ -311,11 +311,11 @@ Generate PCoA and alpha diversity figures coloured by COD_broad.
 
     log.info("── Figures: COD_broad PCoA + alpha ─────────────────────────")
 
-    # Resolve the path to 06_plot_diversity.py relative to THIS script's location
+    # Resolve the path to 09_plot_diversity.py relative to THIS script's location
     # so that 05b can be called from any working directory without breaking.
     # Using sys.executable ensures the same Python interpreter (and therefore the
     # same conda environment and installed packages) is used for the subprocess.
-    plot_script = str(Path(__file__).resolve().parent / "06_plot_diversity.py")
+    plot_script = str(Path(__file__).resolve().parent / "09_plot_diversity.py")
 
     for palette in palettes:
 

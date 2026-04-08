@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-09b_clean_diet_table.py
+11_clean_diet_table.py
 =======================
 Clean raw QIIME2 taxonomy count tables from dietary metabarcoding markers
-(MiFish 12S, cytb) before running 08b_presence_absence.py.
+(MiFish 12S, cytb) before running 11b_presence_absence.py.
 
 Performs the following steps in order, logging every decision:
 
@@ -16,7 +16,7 @@ Performs the following steps in order, logging every decision:
   5. Collapse multiple OTUs to species level (or lowest resolved level)
      so each species appears once per sample in the output
   6. Remove Unassigned / no-taxonomy rows
-  7. Write cleaned count table ready for 08b_presence_absence.py
+  7. Write cleaned count table ready for 11b_presence_absence.py
   8. Write a cleaning report documenting every decision
 
 Marker-specific rules
@@ -41,26 +41,26 @@ cytb:
 Usage
 -----
   # Clean MiFish table
-  python 09b_clean_diet_table.py \\
+  python 11_clean_diet_table.py \\
       --counts  results/MiFish/all/taxonomy/taxonomy_counts_L7_MiFish.tsv \\
       --marker  MiFish \\
       --outdir  results/MiFish/all/taxonomy_cleaned/
 
   # Clean cytb table
-  python 09b_clean_diet_table.py \\
+  python 11_clean_diet_table.py \\
       --counts  results/cytb/all/taxonomy/notrim/taxonomy_counts_L7_cytb.tsv \\
       --marker  cytb \\
       --outdir  results/cytb/all/taxonomy_cleaned/
 
   # Override contamination-suspect samples (comma-separated)
-  python 09b_clean_diet_table.py \\
+  python 11_clean_diet_table.py \\
       --counts   results/MiFish/all/taxonomy/taxonomy_counts_L7_MiFish.tsv \\
       --marker   MiFish \\
       --exclude-samples TV250064 \\
       --outdir   results/MiFish/all/taxonomy_cleaned/
 
   # Dry run -- show what would be removed without writing files
-  python 09b_clean_diet_table.py \\
+  python 11_clean_diet_table.py \\
       --counts  results/MiFish/all/taxonomy/taxonomy_counts_L7_MiFish.tsv \\
       --marker  MiFish \\
       --outdir  results/MiFish/all/taxonomy_cleaned/ \\
@@ -230,7 +230,7 @@ def extract_species(taxon_str: str) -> Optional[str]:
 def get_taxon_col(df: pd.DataFrame) -> str:
     """
     Auto-detect the taxonomy string column.
-    08_taxonomy_table.py outputs 'Species' as the first column.
+    07_taxonomy_table.py outputs 'Species' as the first column.
     Raw CSV files may use 'Taxon'. Fall back to first column.
     """
     for candidate in ("Species", "Taxon"):
@@ -455,7 +455,7 @@ def run_cleaning(
     """Full cleaning pipeline."""
     safe_mkdir(outdir)
 
-    log.info("=== 09b_clean_diet_table: %s ===", marker)
+    log.info("=== 11_clean_diet_table: %s ===", marker)
     log.info("Input : %s", counts_path)
     log.info("Outdir: %s", outdir)
     if dry_run:
@@ -486,12 +486,12 @@ def run_cleaning(
         log.info("  Dropping %d control columns: %s", len(control_cols), control_cols)
         df = df.drop(columns=control_cols, errors="ignore")
 
-    # Auto-detect taxonomy string column ('Species' from 08_taxonomy_table.py, 'Taxon' from raw CSV)
+    # Auto-detect taxonomy string column ('Species' from 07_taxonomy_table.py, 'Taxon' from raw CSV)
     taxon_col = get_taxon_col(df)
     log.info("Taxonomy column: '%s'", taxon_col)
 
     report_lines: List[str] = [
-        f"=== 09b_clean_diet_table cleaning report: {marker} ===",
+        f"=== 11_clean_diet_table cleaning report: {marker} ===",
         f"Input file  : {counts_path}",
         f"Input rows  : {len(df)}",
         f"Marker      : {marker}",
@@ -571,7 +571,7 @@ def run_cleaning(
         f"  Total prey reads   : {total_prey_reads:,}",
         "",
         "Next step — run presence/absence analysis:",
-        f"  python 08b_presence_absence.py \\",
+        f"  python 11b_presence_absence.py \\",
         f"    --counts   {outdir / f'taxonomy_counts_cleaned_{marker}.tsv'} \\",
         f"    --metadata metadata/qiime/metadata_{marker}.tsv \\",
         f"    --marker   {marker} \\",
@@ -612,17 +612,17 @@ def run_cleaning(
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="09b_clean_diet_table.py",
+        prog="11_clean_diet_table.py",
         description=(
             "Clean MiFish or cytb taxonomy count tables before presence/absence "
             "analysis. Removes host reads, artefact taxa, and collapses OTUs to "
-            "species level. Run before 08b_presence_absence.py."
+            "species level. Run before 11b_presence_absence.py."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument(
         "--counts", required=True, type=Path,
-        help="Taxonomy count TSV or CSV from 08_taxonomy_table.py.",
+        help="Taxonomy count TSV or CSV from 07_taxonomy_table.py.",
     )
     p.add_argument(
         "--marker", required=True, choices=["MiFish", "cytb"],

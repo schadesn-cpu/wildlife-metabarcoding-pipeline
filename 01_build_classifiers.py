@@ -1221,7 +1221,7 @@ def build_COI(
         "    --p-exclude Bacteria,Viruses,Archaea,Viridiplantae,Fungi \\\n"
         "    --o-filtered-table qiime2/COI/dada2/table_metazoa.qza\n"
         "\nMIDORI2 taxonomy uses no rank prefixes;\n"
-        "08_taxonomy_table.py handles this automatically."
+        "07_taxonomy_table.py handles this automatically."
     )
 
 
