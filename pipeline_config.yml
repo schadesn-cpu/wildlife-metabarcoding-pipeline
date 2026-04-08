@@ -133,6 +133,7 @@ metadata:
     cod: "metadata/qiime/metadata_cytb_cod_filtered.tsv"
   18S:
     all: "metadata/qiime/metadata_18S.tsv"
+    dvt: "metadata/qiime/metadata_18S_dvt.tsv"
     cod: "metadata/qiime/metadata_18S_cod_filtered.tsv"
 
 # ── Study groups ──────────────────────────────────────────────────────────────

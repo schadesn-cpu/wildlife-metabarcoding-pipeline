@@ -115,9 +115,10 @@ def run(args: list, dry_run: bool, label: str) -> None:
 def both(base: list, stem: str, stats_dir: Path,
          out_ann: Path, out_ms: Path, dry_run: bool, label: str) -> None:
     """Generate both the annotated and manuscript versions of a figure."""
+    ann_extras = (["--stats-dir", str(stats_dir)] if base[0] == "pcoa" else [])
     run(
-        base + ["--stats-dir", str(stats_dir),
-                "--output-stem", f"{stem}_annotated",
+        base + ann_extras
+             + ["--output-stem", f"{stem}_annotated",
                 "--output-dir", str(out_ann)],
         dry_run, f"{label} - annotated",
     )
@@ -127,7 +128,6 @@ def both(base: list, stem: str, stats_dir: Path,
                 "--output-dir", str(out_ms)],
         dry_run, f"{label} - manuscript",
     )
-
 
 def make(marker: str, analysis: str, ann: Path, ms: Path):
     """Create output directories and return (annotated_dir, manuscript_dir)."""
@@ -147,10 +147,13 @@ def dvt_pcoa(cfg, ann: Path, ms: Path, dr: bool, marker: str) -> None:
     """Generate DvT PCoA panel figures (annotated + manuscript)."""
     try:
         core = _cl.get_diversity_dir(cfg, marker, "DvT")
-        meta = _cl.get_metadata_path(cfg, marker, "all")
     except ValueError as e:
         print(f"  Skip {marker} DvT PCoA: {e}")
         return
+    try:
+        meta = _cl.get_metadata_path(cfg, marker, "dvt")
+    except (ValueError, KeyError):
+        meta = _cl.get_metadata_path(cfg, marker, "all")        
     arts      = _pcoa_arts(cfg, marker, core)
     stats_dir = cfg.resolve(f"results/{marker}/DvT/diversity")
     group_col = cfg.groups.get("primary", {}).get("column", "Group")
@@ -173,10 +176,13 @@ def dvt_alpha(cfg, ann: Path, ms: Path, dr: bool, marker: str) -> None:
     """Generate DvT alpha diversity panel figures (annotated + manuscript)."""
     try:
         core = _cl.get_diversity_dir(cfg, marker, "DvT")
-        meta = _cl.get_metadata_path(cfg, marker, "all")
     except ValueError as e:
-        print(f"  Skip {marker} DvT alpha: {e}")
+        print(f"  Skip {marker} DvT PCoA: {e}")
         return
+    try:
+        meta = _cl.get_metadata_path(cfg, marker, "dvt")
+    except (ValueError, KeyError):
+        meta = _cl.get_metadata_path(cfg, marker, "all")
     vecs      = _alpha_vecs(cfg, marker, core)
     stats_dir = cfg.resolve(f"results/{marker}/DvT/diversity")
     group_col = cfg.groups.get("primary", {}).get("column", "Group")
@@ -298,15 +304,176 @@ def season_alpha(cfg, ann: Path, ms: Path, dr: bool, marker: str) -> None:
     both(base, f"{marker}_season_alpha_{palette}", stats_dir, oa, om, dr,
          f"{marker} season alpha")
 
+# ---------------------------------------------------------------------------
+# Taxonomy figure generators (unrarefied RRA — all groupings)
+# ---------------------------------------------------------------------------
+
+_TAXONOMY_RELABUND = {
+    "16S":    "results/16S/all/taxonomy/taxonomy_relabund_L6_16S.tsv",
+    "MiFish": "results/MiFish/all/taxonomy_cleaned/taxonomy_relabund_L7_MiFish_cleaned.tsv",
+    "cytb":   "results/cytb/all/taxonomy_cleaned/taxonomy_relabund_L7_cytb_cleaned.tsv",
+    "18S":    "results/18S/all/taxonomy/taxonomy_relabund_L6_18S.tsv",
+}
+
+
+def _find_taxonomy_script() -> Path:
+    for d in [_PIPELINE_DIR, _PIPELINE_DIR.parent]:
+        p = d / "09_plot_taxonomy.py"
+        if p.exists():
+            return p
+    raise FileNotFoundError("09_plot_taxonomy.py not found.")
+
+
+def run_tax(args: list, dry_run: bool, label: str) -> None:
+    script = _find_taxonomy_script()
+    cmd = [sys.executable, str(script)] + args
+    print(f"\n{'[DRY] ' if dry_run else ''}>> {label}")
+    if dry_run:
+        print(f"  {' '.join(str(x) for x in args[:6])} ...")
+        return
+    r = subprocess.run(cmd)
+    if r.returncode != 0:
+        raise RuntimeError(
+            f"Taxonomy figure failed: {label}\n"
+            f"  Exit code: {r.returncode}"
+        )
+    print(f"  Done")
+
+
+def tax_both(base: list, stem: str,
+             out_ann: Path, out_ms: Path,
+             dry_run: bool, label: str) -> None:
+    run_tax(base + ["--output-stem", f"{stem}_annotated",
+                    "--outdir", str(out_ann)],
+            dry_run, f"{label} - annotated")
+    run_tax(base + ["--no-title",
+                    "--output-stem", stem,
+                    "--outdir", str(out_ms)],
+            dry_run, f"{label} - manuscript")
+
+
+def _tax_relabund(cfg, marker: str):
+    rel = _TAXONOMY_RELABUND.get(marker)
+    if rel is None:
+        print(f"  Skip {marker} taxonomy — no relabund path configured")
+        return None
+    p = Path(cfg.resolve(rel))
+    if not p.exists():
+        print(f"  Skip {marker} taxonomy — relabund not found: {p.name}")
+        return None
+    return p
+
+
+def tax_all(cfg, ann: Path, ms: Path, dr: bool, marker: str) -> None:
+    """All samples grouped by Group (Diseased / Trauma / Marine)."""
+    relabund = _tax_relabund(cfg, marker)
+    if relabund is None:
+        return
+    try:
+        meta = _cl.get_metadata_path(cfg, marker, "all")
+    except ValueError as e:
+        print(f"  Skip {marker} tax_all: {e}")
+        return
+    if no_meta(meta, f"{marker} tax_all"):
+        return
+    palette = cfg.figures.get("palette", "wong")
+    oa, om = make(marker, "all", ann, ms)
+    stem = f"{marker}_unrarefied_all_barplot_{palette}"
+    base = ["--relabund", str(relabund),
+            "--metadata", str(meta),
+            "--group-by", "Group",
+            "--group-order", "Diseased", "Trauma", "Marine",
+            "--marker", marker,
+            "--palette", palette]
+    tax_both(base, stem, oa, om, dr, f"{marker} taxonomy all")
+
+
+def tax_dvt(cfg, ann: Path, ms: Path, dr: bool, marker: str) -> None:
+    """Diseased vs Trauma (Marine excluded via group-order)."""
+    relabund = _tax_relabund(cfg, marker)
+    if relabund is None:
+        return
+    try:
+        meta = _cl.get_metadata_path(cfg, marker, "all")
+    except ValueError as e:
+        print(f"  Skip {marker} tax_dvt: {e}")
+        return
+    if no_meta(meta, f"{marker} tax_dvt"):
+        return
+    dvt_order = _cl.get_dvt_order(cfg)
+    palette = cfg.figures.get("palette", "wong")
+    oa, om = make(marker, "DvT", ann, ms)
+    stem = f"{marker}_unrarefied_DvT_barplot_{palette}"
+    base = (["--relabund", str(relabund),
+             "--metadata", str(meta),
+             "--group-by", "Group",
+             "--group-order"] + dvt_order +
+            ["--marker", marker,
+             "--palette", palette])
+    tax_both(base, stem, oa, om, dr, f"{marker} taxonomy DvT")
+
+
+def tax_cod(cfg, ann: Path, ms: Path, dr: bool, marker: str) -> None:
+    """COD subgroups: Lead / Parasitic_Infectious / Trauma."""
+    relabund = _tax_relabund(cfg, marker)
+    if relabund is None:
+        return
+    try:
+        meta = _cl.get_metadata_path(cfg, marker, "cod")
+    except ValueError as e:
+        print(f"  Skip {marker} tax_cod: {e}")
+        return
+    if no_meta(meta, f"{marker} tax_cod"):
+        return
+    cod_order = _cl.get_group_order(cfg, "secondary") or \
+                ["Lead", "Parasitic_Infectious", "Trauma"]
+    palette = cfg.figures.get("palette", "wong")
+    oa, om = make(marker, "COD", ann, ms)
+    stem = f"{marker}_unrarefied_COD_barplot_{palette}"
+    base = (["--relabund", str(relabund),
+             "--metadata", str(meta),
+             "--group-by", "COD_broad",
+             "--group-order"] + cod_order +
+            ["--marker", marker,
+             "--palette", palette])
+    tax_both(base, stem, oa, om, dr, f"{marker} taxonomy COD")
+
+
+def tax_season(cfg, ann: Path, ms: Path, dr: bool, marker: str) -> None:
+    """Ecological season grouping (Breeding / Freshwater_Nonbreeding / Saltwater)."""
+    relabund = _tax_relabund(cfg, marker)
+    if relabund is None:
+        return
+    try:
+        meta = _cl.get_metadata_path(cfg, marker, "all")
+    except ValueError as e:
+        print(f"  Skip {marker} tax_season: {e}")
+        return
+    if no_meta(meta, f"{marker} tax_season"):
+        return
+    season_order = _cl.get_group_order(cfg, "seasonal") or \
+                   ["Breeding", "Freshwater_Nonbreeding", "Saltwater"]
+    palette = cfg.figures.get("palette", "wong")
+    oa, om = make(marker, "season", ann, ms)
+    stem = f"{marker}_unrarefied_season_barplot_{palette}"
+    base = (["--relabund", str(relabund),
+             "--metadata", str(meta),
+             "--group-by", "Season",
+             "--group-order"] + season_order +
+            ["--marker", marker,
+             "--palette", palette])
+    tax_both(base, stem, oa, om, dr, f"{marker} taxonomy season")
+
 
 # ---------------------------------------------------------------------------
 # Analysis registry
 # ---------------------------------------------------------------------------
 
 GENS = {
-    "DvT":    [dvt_pcoa,    dvt_alpha],
-    "COD":    [cod_pcoa,    cod_alpha],
-    "season": [season_pcoa, season_alpha],
+    "DvT":    [dvt_pcoa,    dvt_alpha, tax_dvt],
+    "COD":    [cod_pcoa,    cod_alpha, tax_cod],
+    "season": [season_pcoa, season_alpha, tax_season],
+    "all":    [tax_all],
 }
 
 
@@ -331,8 +498,8 @@ def main() -> int:
     p.add_argument("--dry-run",  action="store_true")
     p.add_argument("--markers",  nargs="+", default=None,
                    help="Limit to specific markers. Default: active_markers in config.")
-    p.add_argument("--analyses", nargs="+", default=["DvT", "COD", "season"],
-                   choices=["DvT", "COD", "season"])
+    p.add_argument("--analyses", nargs="+", default=["DvT", "COD", "season", "all"],
+                    choices=["DvT", "COD", "season", "all"])
     args = p.parse_args()
 
     try:

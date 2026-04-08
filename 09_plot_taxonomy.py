@@ -374,27 +374,56 @@ def collapse_to_top_n(
     # Re-normalize to 100% per sample (relabund values are 0-1, convert to %)
     result = result * 100
 
-    display_taxa = top_taxa + ["Other"]
+    # Clean taxonomy labels for display
+    label_map = {t: _clean_taxon_label(t) for t in top_taxa}
+    result.index = [label_map.get(i, i) for i in result.index]
+    display_taxa = [label_map.get(t, t) for t in top_taxa] + ["Other"]
     return result, display_taxa
-
 
 # ---------------------------------------------------------------------------
 # Barplot
 # ---------------------------------------------------------------------------
 
-def _is_plain_name(name: str) -> bool:
+def _clean_taxon_label(name: str) -> str:
     """
-    Returns True if the taxon name should NOT be italicized in the legend.
-    Non-italic: Other, uncl.* labels, fully unclassified rows.
-    """
-    if name == "Other":
-        return True
-    if name.startswith("uncl."):
-        return True
-    if name.lower() in ("unclassified", "uncultured bacterium"):
-        return True
-    return False
+    Convert a full QIIME2 taxonomy string to a short readable label.
 
+    e.g. 'k__Metazoa;p__Chordata;c__Actinopteri;o__Clupeiformes;f__Clupeidae;g__Alosa;Unclassified'
+         → 'Alosa Unclassified'
+         'k__Metazoa;p__Chordata;Unclassified;Unclassified;Unclassified;Unclassified;Unclassified'
+         → 'uncl. Chordata'
+    """
+    if ";" not in name:
+        return name  # Already a short name (e.g. 'Other', 'Trematoda')
+
+    parts = [p.strip() for p in name.split(";")]
+    # Strip rank prefixes: k__, p__, c__, o__, f__, g__, s__
+    cleaned = [re.sub(r"^[kpcofgs]__", "", p) for p in parts]
+
+    # Separate classified from unclassified levels
+    UNCLASSIFIED = {"Unclassified", "uncultured", "uncl.", "", "X"}
+    classified = [(i, v) for i, v in enumerate(cleaned)
+                  if v not in UNCLASSIFIED and not v.startswith("uncl")]
+    unclassified = [(i, v) for i, v in enumerate(cleaned)
+                    if v in UNCLASSIFIED or v.startswith("uncl")]
+
+    if not classified:
+        return "uncl. " + cleaned[0] if cleaned else name
+
+    last_idx, last_val = classified[-1]
+
+    # If the level immediately after is unclassified, note it
+    if last_idx + 1 < len(cleaned) and cleaned[last_idx + 1] in UNCLASSIFIED:
+        return f"{last_val} X" if last_val.endswith("ae") or last_val.endswith("a") \
+               else f"{last_val} Unclassified"
+
+    return last_val
+
+
+def _is_plain_name(name: str) -> bool:
+    if name in ("Other",): return True
+    if name.startswith("uncl."): return True
+    return False
 
 def _sort_group_samples(
     samples: List[str],
