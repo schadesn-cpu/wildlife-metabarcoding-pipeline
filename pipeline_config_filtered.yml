@@ -78,7 +78,7 @@ markers:
   MiFish:
     description:       "Fish 12S MiFish-U (MitoFish + host)"
     classifier:        "classifiers/mitofish-12S-mifish-gavia-classifier.qza"
-    rarefaction_depth: 17000
+    rarefaction_depth: 1000
     phylo:             false
     pcoa_metrics:
       - "bray_curtis"
@@ -181,8 +181,8 @@ diversity_dirs:
     DvT:    "qiime2/16S/rarefied_8000/DvT/diversity/core_metrics_depth8000"
     season: "qiime2/16S/rarefied_8000/season/diversity/core_metrics_depth8000"
   MiFish:
-    DvT:    "qiime2/MiFish/all/diversity/core-metrics-17000-filtered"
-    season: "qiime2/MiFish/all/diversity/core-metrics-17000-filtered"
+    DvT:    "qiime2/MiFish/all/diversity/core-metrics-1000-final"
+    season: "qiime2/MiFish/all/diversity/core-metrics-1000-final"
   cytb:
     DvT:    "qiime2/cytb/all/diversity/core-metrics-1000-final"
     season: "qiime2/cytb/all/diversity/core-metrics-1000-final"
