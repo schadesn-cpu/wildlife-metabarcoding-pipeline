@@ -21,15 +21,38 @@ WHAT THIS SCRIPT PRODUCES
 
   - Stacked barplot of relative abundance (%) per sample
   - Top-N taxa shown individually, remainder collapsed to "Other"
-  - Samples ordered within groups by dominant taxon
-  - Group labels above bars with n= counts
-  - Vertical dashed dividers between groups
+  - Samples ordered within groups by dominant taxon (default sort mode)
+    OR
+  - Samples clustered by their own dominant taxon across all samples,
+    for unstructured baseline figures (--sort-mode dominant-taxon)
+  - Group labels above bars with n= counts (group mode only)
+  - Vertical dashed dividers between groups (group mode only)
+  - Optional thin dividers and small italic labels between dominant-taxon
+    clusters (dominant-taxon mode with --cluster-labels)
   - Italic taxon names in legend (non-genus labels like "Other" left upright)
   - Both PNG (300 dpi, slides/SharePoint) and SVG (Illustrator-editable)
 
-Relative abundance is calculated among classified reads only (output of 08_).
+Relative abundance is calculated among classified reads only (output of 07_).
 Methods note: "Relative abundance was calculated among reads assigned at
 [level] level following [database] classification."
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SORT MODES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  --sort-mode group           (default, existing behavior)
+    Samples grouped by --group-by column, ordered left-to-right by
+    --group-order, sorted within each group by the overall-dominant taxon.
+    Produces grouped bar charts with colored headers and dashed dividers.
+
+  --sort-mode dominant-taxon  (new, for baseline figures)
+    All samples placed in a single waterfall, clustered by each sample's
+    own dominant taxon. Clusters ordered left-to-right by the number of
+    samples with that taxon as dominant. Within each cluster, samples
+    ordered by that taxon's relative abundance descending. No group
+    dividers or headers — use for unstructured baseline community views.
+    When this mode is active, --group-by is optional; if provided, it is
+    ignored for layout but still checked for sample matching.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PALETTES — kept in sync with 09_plot_diversity.py and 09c_visualize_diversity.py
@@ -50,7 +73,7 @@ PALETTES — kept in sync with 09_plot_diversity.py and 09c_visualize_diversity.
 USAGE EXAMPLES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  # 16S Diseased vs Trauma, purple palette
+  # 16S Diseased vs Trauma, purple palette (group mode, default)
   python 10_plot_taxonomy.py \\
       --relabund  results/16S/DvT/taxonomy/taxonomy_relabund_L6_16S.tsv \\
       --metadata  metadata/qiime/metadata_16S.tsv \\
@@ -59,16 +82,18 @@ USAGE EXAMPLES
       --palette   purple \\
       --outdir    results/16S/DvT/figures/taxonomy/
 
-  # Same data, red-blue palette
+  # Unstructured baseline across all samples (NEW — for slide 8 / Figure 2)
   python 10_plot_taxonomy.py \\
-      --relabund  results/16S/DvT/taxonomy/taxonomy_relabund_L6_16S.tsv \\
-      --metadata  metadata/qiime/metadata_16S.tsv \\
-      --group-by  Group \\
-      --marker    16S \\
-      --palette   redblue \\
-      --outdir    results/16S/DvT/figures/taxonomy/
+      --relabund     results/16S/all/taxonomy/taxonomy_relabund_L6_16S.tsv \\
+      --metadata     metadata/qiime/metadata_16S_ecoseason.tsv \\
+      --sort-mode    dominant-taxon \\
+      --cluster-labels \\
+      --marker       16S \\
+      --palette      wong \\
+      --output-stem  16S_baseline_dominant_taxon_wong \\
+      --outdir       results/16S/all/figures/taxonomy/
 
-  # Seasonal grouping, explicit order, top 20 taxa
+  # Seasonal grouping, explicit order, top 20 taxa (group mode)
   python 10_plot_taxonomy.py \\
       --relabund    results/16S/DvT/taxonomy/taxonomy_relabund_L6_16S.tsv \\
       --metadata    metadata/qiime/metadata_16S.tsv \\
@@ -104,6 +129,7 @@ import io
 import logging
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -131,6 +157,7 @@ FONT_SIZE_AXIS   = 11
 FONT_SIZE_TICK   = 9
 FONT_SIZE_LEGEND = 8.5
 FONT_SIZE_GROUP  = 11
+FONT_SIZE_CLUSTER = 9
 
 # ---------------------------------------------------------------------------
 # Palettes
@@ -188,9 +215,12 @@ PALETTES: Dict[str, Dict] = {
             "#F0E442",  # yellow        — Group 7
             "#999999",  # grey          — Group 8
         ],
-        # 15-taxon colorblind-safe palette:
-        # Colors 1-7: Wong 2011 (no black — replaced with Tol Indigo)
-        # Colors 8-15: Paul Tol 'Muted' qualitative palette (doi:10.5281/zenodo.3381072)
+        # 25-taxon colorblind-safe palette:
+        # Colors 1-7:   Wong 2011 (no black — replaced with Tol indigo in pos 8)
+        # Colors 8-15:  Paul Tol 'Muted' qualitative palette (doi:10.5281/zenodo.3381072)
+        # Colors 16-25: Additional Tol Muted + Tol Bright colors for larger top_n
+        # Positions 1-15 are byte-identical to the prior palette — existing
+        # wong plots with top-n <= 15 are unchanged.
         "taxa_colors": [
             "#0072B2",  # Wong blue         — taxon 1  (most abundant)
             "#E69F00",  # Wong orange       — taxon 2
@@ -207,6 +237,16 @@ PALETTES: Dict[str, Dict] = {
             "#FFAABB",  # Tol rose          — taxon 13
             "#DDDDDD",  # Tol pale grey     — taxon 14
             "#994F00",  # Tol brown         — taxon 15
+            "#332288",  # Tol Muted indigo  — taxon 16  (deep blue-purple)
+            "#117733",  # Tol Muted forest  — taxon 17
+            "#882255",  # Tol Muted wine    — taxon 18
+            "#DDCC77",  # Tol Muted sand    — taxon 19
+            "#EE6677",  # Tol Bright red    — taxon 20
+            "#228833",  # Tol Bright green  — taxon 21
+            "#4477AA",  # Tol Bright blue   — taxon 22
+            "#CCBB44",  # Tol Bright yellow — taxon 23
+            "#AA3377",  # Tol Bright magenta — taxon 24
+            "#66CCEE",  # Tol Bright cyan   — taxon 25
             "#AAAAAA",  # Other
         ],
     },
@@ -249,6 +289,22 @@ def load_metadata(metadata_path: Path, group_column: str) -> pd.Series:
     series = df[group_column].dropna()
     series.name = group_column
     return series
+
+
+def load_all_samples_from_metadata(metadata_path: Path) -> List[str]:
+    """
+    Load the sample-id index from a metadata TSV without requiring a specific
+    grouping column. Used by dominant-taxon sort mode when --group-by is omitted.
+    """
+    with metadata_path.open(encoding="utf-8-sig") as f:
+        lines = f.readlines()
+    header = lines[0]
+    data_lines = [l for l in lines[1:] if not l.startswith("#")]
+    content = header + "".join(data_lines)
+    sep = "\t" if "\t" in header else ","
+    df = pd.read_csv(io.StringIO(content), sep=sep, index_col=0, dtype=str)
+    df.index = df.index.str.strip()
+    return df.index.tolist()
 
 
 def list_metadata_columns(metadata_path: Path) -> None:
@@ -441,6 +497,72 @@ def _sort_group_samples(
     return samples
 
 
+def _sort_by_dominant_taxon(
+    samples: List[str],
+    relabund_pct: pd.DataFrame,
+    display_taxa: List[str],
+) -> Tuple[List[str], List[Tuple[str, int, int]]]:
+    """
+    Sort samples by their own dominant taxon, producing a waterfall-style
+    layout for unstructured baseline figures.
+
+    For each sample, identify the single most abundant named taxon (from
+    display_taxa excluding 'Other'). Cluster samples by that dominant taxon.
+    Order clusters left-to-right by the number of samples with that taxon as
+    dominant (most common first). Within each cluster, order samples by that
+    taxon's relative abundance descending.
+
+    Samples whose largest contribution is 'Other' (or whose named-taxon
+    abundances all sum to zero) fall into a trailing 'Other' cluster.
+
+    Returns
+    -------
+    ordered_samples : list of sample IDs in the new order
+    cluster_spans   : list of (dominant_taxon, start_idx, end_idx) tuples
+                      suitable for annotating cluster boundaries
+    """
+    non_other = [t for t in display_taxa if t != "Other"]
+    if not non_other or not samples:
+        return list(samples), []
+
+    # Identify each sample's dominant named taxon. If a sample has no named-taxon
+    # signal (all zero), assign it to the 'Other' cluster at the end.
+    sample_dominant: Dict[str, str] = {}
+    for s in samples:
+        col = relabund_pct[s].reindex(non_other).fillna(0.0)
+        if col.sum() == 0:
+            sample_dominant[s] = "Other"
+        else:
+            sample_dominant[s] = col.idxmax()
+
+    # Count samples per dominant taxon, then order clusters.
+    # Primary sort: descending sample count.
+    # Tie-break: overall taxon rank in display_taxa (most abundant overall first).
+    counts = Counter(sample_dominant.values())
+    named_clusters = sorted(
+        [t for t in counts if t != "Other"],
+        key=lambda t: (-counts[t], non_other.index(t) if t in non_other else 999),
+    )
+    cluster_order = named_clusters + (["Other"] if "Other" in counts else [])
+
+    ordered_samples: List[str] = []
+    cluster_spans: List[Tuple[str, int, int]] = []
+
+    for taxon in cluster_order:
+        members = [s for s in samples if sample_dominant[s] == taxon]
+        if not members:
+            continue
+        if taxon in relabund_pct.index:
+            order = relabund_pct.loc[taxon, members].sort_values(ascending=False)
+            members = list(order.index)
+        start = len(ordered_samples)
+        ordered_samples.extend(members)
+        end = len(ordered_samples) - 1
+        cluster_spans.append((taxon, start, end))
+
+    return ordered_samples, cluster_spans
+
+
 def plot_barplot(
     relabund: pd.DataFrame,
     sample_groups: Dict[str, Optional[str]],
@@ -452,21 +574,36 @@ def plot_barplot(
     title: Optional[str],
     outpath_stem: Path,
     show_title: bool = True,
+    sort_mode: str = "group",
+    cluster_labels: bool = False,
+    min_cluster_label_size: int = 2,
 ) -> None:
     """
     Generate and save a stacked barplot (PNG + SVG).
 
     Parameters
     ----------
-    relabund      : taxa × samples DataFrame (values 0–1, from 08_)
-    sample_groups : {sample_id: group_label} mapping
-    group_order   : ordered list of group labels to plot
-    top_n         : number of top taxa to show before collapsing to Other
-    palette_name  : 'purple', 'redblue', or 'wong'
-    marker        : marker label for figure title (e.g. '16S')
-    group_column  : metadata column name used for grouping (for display)
-    title         : override figure title (None = auto-generate)
-    outpath_stem  : output path without extension (will save .png and .svg)
+    relabund       : taxa × samples DataFrame (values 0–1, from 07_)
+    sample_groups  : {sample_id: group_label} mapping. In dominant-taxon mode
+                     this can contain Nones; samples with None are still
+                     plotted (they pass sample-matching at the caller level).
+    group_order    : ordered list of group labels to plot (group mode only).
+                     In dominant-taxon mode this is ignored for layout.
+    top_n          : number of top taxa to show before collapsing to Other
+    palette_name   : 'purple', 'redblue', or 'wong'
+    marker         : marker label for figure title (e.g. '16S')
+    group_column   : metadata column name used for grouping (for display)
+    title          : override figure title (None = auto-generate)
+    outpath_stem   : output path without extension (will save .png and .svg)
+    show_title     : whether to draw the figure title
+    sort_mode      : 'group' (default, grouped bar chart with headers) or
+                     'dominant-taxon' (unstructured waterfall baseline)
+    cluster_labels : when sort_mode='dominant-taxon', draw small italic labels
+                     above each dominant-taxon cluster
+    min_cluster_label_size : when cluster_labels is True, only label clusters
+                     with at least this many samples. Single-sample clusters
+                     remain unlabeled to prevent overlap. All taxa are still
+                     visible in the legend. Default: 2.
     """
     palette = PALETTES[palette_name]
     group_colors = palette["group_colors"]
@@ -474,38 +611,85 @@ def plot_barplot(
 
     # ── Build ordered sample list ─────────────────────────────────────────
     ordered_samples: List[str] = []
-    group_spans: List[Tuple[str, int, int, str]] = []  # (label, start_idx, end_idx, color)
+    group_spans: List[Tuple[str, int, int, str]] = []  # (label, start, end, color)
+    cluster_spans: List[Tuple[str, int, int]] = []
 
-    for gi, grp in enumerate(group_order):
-        grp_samples = [s for s in relabund.columns
-                       if sample_groups.get(s) == grp]
-        if not grp_samples:
-            log.warning("Group '%s' has no samples in the relabund table — skipping.", grp)
-            continue
+    if sort_mode == "dominant-taxon":
+        # Unstructured baseline: pool all samples, cluster by dominant taxon.
+        all_samples = [s for s in relabund.columns]
+        if not all_samples:
+            log.error("No samples in relabund table. Cannot plot.")
+            sys.exit(1)
 
-        # Collapse top-N using only this group's samples for ranking
+        # Rank top-N taxa across the pooled sample set, then use that ranking
+        # to determine each sample's dominant taxon.
         rel_pct_all, display_taxa = collapse_to_top_n(relabund, top_n)
-        sorted_samps = _sort_group_samples(grp_samples, rel_pct_all, display_taxa)
+        ordered_samples, cluster_spans = _sort_by_dominant_taxon(
+            all_samples, rel_pct_all, display_taxa,
+        )
+    else:
+        # Existing grouped behavior.
+        for gi, grp in enumerate(group_order):
+            grp_samples = [s for s in relabund.columns
+                           if sample_groups.get(s) == grp]
+            if not grp_samples:
+                log.warning(
+                    "Group '%s' has no samples in the relabund table — skipping.", grp,
+                )
+                continue
 
-        start = len(ordered_samples)
-        ordered_samples.extend(sorted_samps)
-        end = len(ordered_samples) - 1
-        color = group_colors[gi % len(group_colors)]
-        group_spans.append((grp, start, end, color))
+            # Collapse top-N using only this group's samples for ranking
+            rel_pct_all, display_taxa = collapse_to_top_n(relabund, top_n)
+            sorted_samps = _sort_group_samples(grp_samples, rel_pct_all, display_taxa)
 
-    if not ordered_samples:
-        log.error("No samples matched any group in %s. Check --group-by and metadata.", group_order)
-        sys.exit(1)
+            start = len(ordered_samples)
+            ordered_samples.extend(sorted_samps)
+            end = len(ordered_samples) - 1
+            color = group_colors[gi % len(group_colors)]
+            group_spans.append((grp, start, end, color))
 
-    # ── Final top-N collapse across all ordered samples ───────────────────
+        if not ordered_samples:
+            log.error(
+                "No samples matched any group in %s. Check --group-by and metadata.",
+                group_order,
+            )
+            sys.exit(1)
+
+    # ── Final top-N collapse across the ordered sample set ────────────────
     rel_pct, display_taxa = collapse_to_top_n(relabund, top_n, ordered_samples)
 
-    # Assign taxa colors
-    tax_color_map = {
-        t: taxa_colors[i] if i < len(taxa_colors) else "#CCCCCC"
-        for i, t in enumerate(display_taxa)
-    }
+    # Assign taxa colors. For top_n small enough to fit the hardcoded palette
+    # (≤15 named taxa), behavior is unchanged — existing figures stay
+    # byte-identical. For larger top_n, sample a matplotlib colormap so every
+    # named taxon gets a distinguishable color instead of falling back to grey.
+    # 'Other' always keeps the palette's designated grey.
+    _other_color = taxa_colors[-1]
+    _named_taxa = [t for t in display_taxa if t != "Other"]
+    _n_named = len(_named_taxa)
+    _n_palette_named = len(taxa_colors) - 1  # last slot reserved for Other
 
+    if _n_named <= _n_palette_named:
+        _named_colors = list(taxa_colors[:_n_named])
+    else:
+        _cmap_name = {
+            "purple":  "Purples",
+            "redblue": "RdBu_r",
+            "wong":    "tab20",
+        }.get(palette_name, "viridis")
+        _cmap = plt.get_cmap(_cmap_name)
+        if _cmap_name == "Purples":
+            # Skip the palest end so light bars remain visible on white.
+            _xs = np.linspace(0.35, 0.95, _n_named)
+        elif _cmap_name == "tab20":
+            # Qualitative cycle through tab20's 20 distinct colors.
+            _xs = [(i % 20) / 20 + 0.025 for i in range(_n_named)]
+        else:
+            _xs = np.linspace(0, 1, _n_named)
+        _named_colors = [_cmap(x) for x in _xs]
+
+    tax_color_map = {t: c for t, c in zip(_named_taxa, _named_colors)}
+    if "Other" in display_taxa:
+        tax_color_map["Other"] = _other_color
     # ── Figure ────────────────────────────────────────────────────────────
     n = len(ordered_samples)
     fig_w = max(14, n * 0.62)
@@ -526,7 +710,7 @@ def plot_barplot(
         )
         bottom += vals
 
-    # ── Group dividers and header labels ──────────────────────────────────
+    # ── Group dividers and header labels (group mode only) ────────────────
     for i, (grp, start, end, color) in enumerate(group_spans):
         mid = (start + end) / 2
         n_grp = end - start + 1
@@ -540,6 +724,43 @@ def plot_barplot(
             ax.axvline(
                 start - 0.5,
                 color="#999999", lw=1.2, linestyle="--", zorder=5,
+            )
+
+    # ── Cluster dividers and labels (dominant-taxon mode only) ────────────
+    if sort_mode == "dominant-taxon" and cluster_spans:
+        n_suppressed = 0
+        for i, (taxon, start, end) in enumerate(cluster_spans):
+            if i > 0:
+                ax.axvline(
+                    start - 0.5,
+                    color="#cccccc", lw=0.8, linestyle=":", zorder=5,
+                )
+            if cluster_labels:
+                n_cl = end - start + 1
+                if n_cl < min_cluster_label_size:
+                    # Suppress label for small clusters to prevent overlap.
+                    # Taxa remain visible in the legend.
+                    n_suppressed += 1
+                    continue
+                mid = (start + end) / 2
+                label_text = f"{taxon}  (n={n_cl})"
+                txt = ax.text(
+                    mid, 101.5,
+                    label_text,
+                    ha="center", va="bottom",
+                    fontsize=FONT_SIZE_CLUSTER,
+                    color="#444444",
+                )
+                # Italicize the taxon portion if it's a genus-style name.
+                # Use a simple approach: italicize the whole label unless it's
+                # a plain name like 'Other' or 'uncl. Chordata'.
+                if not _is_plain_name(taxon):
+                    txt.set_fontstyle("italic")
+        if cluster_labels and n_suppressed > 0:
+            log.info(
+                "Suppressed %d cluster label(s) below --min-cluster-label-size=%d "
+                "(taxa still visible in legend).",
+                n_suppressed, min_cluster_label_size,
             )
 
     # ── X-axis tick labels ────────────────────────────────────────────────
@@ -561,10 +782,18 @@ def plot_barplot(
 
     # ── Title ─────────────────────────────────────────────────────────────
     if show_title:
-        fig_title = title or (
-            f"Genus-Level Relative Abundance — {marker}\n"
-            f"Grouped by {group_column}"
-        )
+        if title:
+            fig_title = title
+        elif sort_mode == "dominant-taxon":
+            fig_title = (
+                f"Genus-Level Relative Abundance — {marker}\n"
+                f"All samples, clustered by dominant taxon"
+            )
+        else:
+            fig_title = (
+                f"Genus-Level Relative Abundance — {marker}\n"
+                f"Grouped by {group_column}"
+            )
         ax.set_title(fig_title, fontsize=FONT_SIZE_TITLE, fontweight="bold", pad=10)
 
     # ── Legend ────────────────────────────────────────────────────────────
@@ -617,7 +846,7 @@ def build_parser() -> argparse.ArgumentParser:
 Build and return the argument parser for 10_plot_taxonomy.py.
 
     Key arguments: --relabund (TSV from 07_taxonomy_table.py), --marker,
-    --group-by (metadata column), --palette, --top-n, --outdir.
+    --group-by (metadata column), --palette, --top-n, --outdir, --sort-mode.
     A --list-columns flag is also available to inspect available metadata
     columns without producing any figures.
     """
@@ -644,12 +873,18 @@ Build and return the argument parser for 10_plot_taxonomy.py.
         "--metadata", required=True, type=Path,
         help=(
             "QIIME 2 metadata TSV or source metadata CSV/TSV. "
-            "Must contain a sample-id column (or TV column) and the --group-by column."
+            "Must contain a sample-id column (or TV column) and the --group-by column "
+            "(unless --sort-mode dominant-taxon, which does not require --group-by)."
         ),
     )
     req.add_argument(
         "--group-by", dest="group_by", default=None,
-        help="Metadata column to group samples by (e.g. Group, Season).",
+        help=(
+            "Metadata column to group samples by (e.g. Group, Season). "
+            "Required for --sort-mode group (default). "
+            "Optional for --sort-mode dominant-taxon; if provided in that mode, "
+            "it is ignored for layout."
+        ),
     )
 
     opt = p.add_argument_group("plot options")
@@ -657,7 +892,49 @@ Build and return the argument parser for 10_plot_taxonomy.py.
         "--group-order", dest="group_order", nargs="*", default=None,
         help=(
             "Explicit group order left-to-right (e.g. --group-order Diseased Trauma). "
-            "Default: alphabetical."
+            "Default: alphabetical. Ignored when --sort-mode dominant-taxon."
+        ),
+    )
+    opt.add_argument(
+        "--sort-mode",
+        choices=["group", "dominant-taxon"],
+        default="group",
+        dest="sort_mode",
+        help=(
+            "How to order samples on the x-axis. "
+            "'group' (default) = group samples by --group-by, sort within each "
+            "group by the overall-dominant taxon. Preserves existing behavior. "
+            "'dominant-taxon' = unstructured baseline view. Samples clustered by "
+            "their own dominant taxon, clusters ordered by prevalence, samples "
+            "within each cluster ordered by that taxon's abundance descending. "
+            "Use for baseline figures without group faceting."
+        ),
+    )
+    opt.add_argument(
+        "--cluster-labels", action="store_true", dest="cluster_labels",
+        help=(
+            "When --sort-mode dominant-taxon, add small italic labels above "
+            "each dominant-taxon cluster showing taxon name and sample count. "
+            "Default: off (clean waterfall with no annotations)."
+        ),
+    )
+    opt.add_argument(
+        "--min-cluster-label-size", type=int, default=2,
+        dest="min_cluster_label_size",
+        help=(
+            "When --cluster-labels is set, only label clusters with at least "
+            "this many samples. Single-sample clusters remain unlabeled to "
+            "prevent overlap. All taxa remain visible in the legend regardless. "
+            "Set to 1 to label every cluster. Default: 2."
+        ),
+    )
+    opt.add_argument(
+        "--include-controls", action="store_true", dest="include_controls",
+        help=(
+            "When --sort-mode dominant-taxon, include process controls "
+            "(NTC-, PAC-, XB- prefixes) in the plot. Default: excluded. "
+            "Use for QC visualization of contamination signal; omit for "
+            "clean baseline figures of biological samples only."
         ),
     )
     opt.add_argument(
@@ -726,9 +1003,11 @@ def main(argv=None) -> int:
 Parse arguments and generate stacked taxonomy barplots.
 
     Reads the relative abundance TSV produced by 07_taxonomy_table.py, groups
-    samples by the specified metadata column, collapses low-abundance taxa into
-    'Other', and writes one PNG (300 dpi) + SVG pair per palette to --outdir.
-    Returns 0 on success, 2 if required input files are missing, 1 on error.
+    samples by the specified metadata column (group mode) or clusters them by
+    their own dominant taxon (dominant-taxon mode), collapses low-abundance
+    taxa into 'Other', and writes one PNG (300 dpi) + SVG pair per palette to
+    --outdir. Returns 0 on success, 2 if required input files are missing,
+    1 on error.
     """
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -742,9 +1021,29 @@ Parse arguments and generate stacked taxonomy barplots.
         return 0
 
     # ── Validate required args ────────────────────────────────────────────
-    if not args.group_by:
-        log.error("--group-by is required. Use --list-columns to see available columns.")
-        return 2
+    if args.sort_mode == "group":
+        if not args.group_by:
+            log.error(
+                "--group-by is required in --sort-mode group (default). "
+                "Use --list-columns to see available columns, or pass "
+                "--sort-mode dominant-taxon for an unstructured baseline plot."
+            )
+            return 2
+    else:
+        # dominant-taxon mode
+        if args.group_by:
+            log.warning(
+                "--group-by '%s' is ignored in --sort-mode dominant-taxon "
+                "(baseline layout does not use group faceting).",
+                args.group_by,
+            )
+        if args.group_order:
+            log.warning(
+                "--group-order is ignored in --sort-mode dominant-taxon.",
+            )
+        if args.cluster_labels:
+            log.info("Cluster labels enabled above each dominant-taxon cluster.")
+
     if not args.relabund.exists():
         log.error("Relabund file not found: %s", args.relabund)
         return 2
@@ -754,38 +1053,86 @@ Parse arguments and generate stacked taxonomy barplots.
 
     # ── Load data ─────────────────────────────────────────────────────────
     relabund = load_relabund(args.relabund)
-    group_series = load_metadata(args.metadata, args.group_by)
 
-    # ── Match samples to groups ───────────────────────────────────────────
-    sample_groups = match_samples(relabund.columns, group_series)
+    # ── Match samples to groups (or build a passthrough map) ──────────────
+    if args.sort_mode == "group":
+        group_series = load_metadata(args.metadata, args.group_by)
+        sample_groups = match_samples(relabund.columns, group_series)
+        matched = {k: v for k, v in sample_groups.items() if v is not None}
+        if not matched:
+            log.error(
+                "No samples in the relabund table matched any sample ID in the metadata.\n"
+                "  Relabund columns (first 3): %s\n"
+                "  Metadata IDs (first 3): %s",
+                list(relabund.columns[:3]),
+                list(group_series.index[:3]),
+            )
+            return 1
+        log.info("Matched %d / %d samples to metadata",
+                 len(matched), len(relabund.columns))
 
-    matched = {k: v for k, v in sample_groups.items() if v is not None}
-    if not matched:
-        log.error(
-            "No samples in the relabund table matched any sample ID in the metadata.\n"
-            "  Relabund columns (first 3): %s\n"
-            "  Metadata IDs (first 3): %s",
-            list(relabund.columns[:3]),
-            list(group_series.index[:3]),
-        )
-        return 1
+        # Determine group order
+        all_groups = sorted({v for v in sample_groups.values() if v is not None})
+        if args.group_order:
+            group_order = args.group_order
+            missing = [g for g in group_order if g not in all_groups]
+            if missing:
+                log.warning("Groups in --group-order not found in metadata: %s", missing)
+        else:
+            group_order = all_groups
 
-    log.info("Matched %d / %d samples to metadata", len(matched), len(relabund.columns))
-
-    # ── Determine group order ─────────────────────────────────────────────
-    all_groups = sorted({v for v in sample_groups.values() if v is not None})
-    if args.group_order:
-        group_order = args.group_order
-        missing = [g for g in group_order if g not in all_groups]
-        if missing:
-            log.warning("Groups in --group-order not found in metadata: %s", missing)
+        log.info("Groups: %s", group_order)
+        for g in group_order:
+            n = sum(1 for v in sample_groups.values() if v == g)
+            log.info("  %s: n=%d", g, n)
     else:
-        group_order = all_groups
+        # dominant-taxon mode: filter controls, then build passthrough sample map.
+        #
+        # Controls (NTC-, PAC-, XB-) must be removed explicitly here because
+        # dominant-taxon mode does not use --group-by, so the usual group-based
+        # exclusion does not apply. Pass --include-controls to override (e.g.
+        # for QC visualization of contamination signal in process controls).
+        if not args.include_controls:
+            CONTROL_PREFIXES = ("NTC-", "PAC-", "XB-")
+            biological_samples = [
+                s for s in relabund.columns
+                if not any(s.startswith(p) for p in CONTROL_PREFIXES)
+            ]
+            n_controls = len(relabund.columns) - len(biological_samples)
+            if n_controls > 0:
+                excluded = [s for s in relabund.columns if s not in biological_samples]
+                log.info(
+                    "Excluded %d control sample(s) from baseline plot: %s",
+                    n_controls, excluded,
+                )
+                log.info("Pass --include-controls to keep controls in the plot.")
+                relabund = relabund[biological_samples]
+        else:
+            log.info("--include-controls set: controls will be plotted alongside biological samples.")
 
-    log.info("Groups: %s", group_order)
-    for g in group_order:
-        n = sum(1 for v in sample_groups.values() if v == g)
-        log.info("  %s: n=%d", g, n)
+        # metadata is used only for sanity-checking sample IDs in this mode
+        try:
+            meta_samples = load_all_samples_from_metadata(args.metadata)
+            matched_count = sum(
+                1 for s in relabund.columns
+                if s in meta_samples
+                or any(s.startswith(m) for m in meta_samples)
+                or any(m.startswith(s) for m in meta_samples)
+            )
+            log.info(
+                "Metadata sanity check: %d / %d relabund samples have a "
+                "matching entry in metadata",
+                matched_count, len(relabund.columns),
+            )
+        except Exception as e:
+            log.warning("Could not sanity-check sample IDs against metadata: %s", e)
+
+        sample_groups = {s: None for s in relabund.columns}
+        group_order = []
+        log.info(
+            "Sort mode: dominant-taxon (%d samples will be plotted as one pool)",
+            len(relabund.columns),
+        )
 
     # ── Build output path stem ────────────────────────────────────────────
     outdir = args.outdir or args.relabund.parent
@@ -793,7 +1140,10 @@ Parse arguments and generate stacked taxonomy barplots.
         stem_name = args.output_stem
     else:
         marker_str   = f"_{args.marker}"  if args.marker   else ""
-        group_str    = f"_{args.group_by}"
+        if args.sort_mode == "dominant-taxon":
+            group_str = "_baseline_dominant_taxon"
+        else:
+            group_str = f"_{args.group_by}"
         suffix_str   = f"_{args.suffix}"  if args.suffix   else ""
         palette_str  = f"_{args.palette}"
         stem_name    = f"barplot{marker_str}{group_str}{suffix_str}{palette_str}"
@@ -802,6 +1152,7 @@ Parse arguments and generate stacked taxonomy barplots.
     log.info("Output stem : %s", outpath_stem)
     log.info("Top-N taxa  : %d", args.top_n)
     log.info("Palette     : %s", args.palette)
+    log.info("Sort mode   : %s", args.sort_mode)
 
     if args.dry_run:
         log.info("DRY RUN — no files written.")
@@ -811,16 +1162,19 @@ Parse arguments and generate stacked taxonomy barplots.
 
     # ── Plot ──────────────────────────────────────────────────────────────
     plot_barplot(
-        relabund     = relabund,
-        sample_groups= sample_groups,
-        group_order  = group_order,
-        top_n        = args.top_n,
-        palette_name = args.palette,
-        marker       = args.marker,
-        group_column = args.group_by,
-        title        = args.title,
-        outpath_stem = outpath_stem,
-        show_title   = not args.no_title,
+        relabund                = relabund,
+        sample_groups           = sample_groups,
+        group_order             = group_order,
+        top_n                   = args.top_n,
+        palette_name            = args.palette,
+        marker                  = args.marker,
+        group_column            = args.group_by or "",
+        title                   = args.title,
+        outpath_stem            = outpath_stem,
+        show_title              = not args.no_title,
+        sort_mode               = args.sort_mode,
+        cluster_labels          = args.cluster_labels,
+        min_cluster_label_size  = args.min_cluster_label_size,
     )
 
     log.info("=== Done. Figures in: %s ===", outdir)

@@ -13,10 +13,10 @@ All paths and group names are read from pipeline_config.yml via config_loader.
 No hardcoded project-specific values remain in this script.
 
 Usage (run from project root):
-    python scripts/run_all_figures_v2.py [--dry-run]
-    python scripts/run_all_figures_v2.py --markers 16S MiFish
-    python scripts/run_all_figures_v2.py --analyses DvT COD
-    python scripts/run_all_figures_v2.py --config /path/to/pipeline_config.yml
+    python scripts/run_all_figures.py [--dry-run]
+    python scripts/run_all_figures.py --markers 16S MiFish
+    python scripts/run_all_figures.py --analyses DvT COD
+    python scripts/run_all_figures.py --config /path/to/pipeline_config.yml
 
 Author: Samantha Schade - MEED Lab, UNH - 2026-04-03
 """
@@ -115,7 +115,9 @@ def run(args: list, dry_run: bool, label: str) -> None:
 def both(base: list, stem: str, stats_dir: Path,
          out_ann: Path, out_ms: Path, dry_run: bool, label: str) -> None:
     """Generate both the annotated and manuscript versions of a figure."""
-    ann_extras = (["--stats-dir", str(stats_dir)] if base[0] == "pcoa" else [])
+    ann_extras = (["--stats-dir", str(stats_dir)] if base[0] == "pcoa"
+                  else ["--stats-qzv-dir", str(stats_dir)] if base[0] == "alpha"
+                  else [])
     run(
         base + ann_extras
              + ["--output-stem", f"{stem}_annotated",
@@ -309,7 +311,7 @@ def season_alpha(cfg, ann: Path, ms: Path, dr: bool, marker: str) -> None:
 # ---------------------------------------------------------------------------
 
 _TAXONOMY_RELABUND = {
-    "16S":    "results/16S/all/taxonomy/taxonomy_relabund_L6_16S.tsv",
+    "16S":    "results/16S/all/taxonomy_refined/taxonomy_relabund_L6_16S.tsv",
     "MiFish": "results/MiFish/all/taxonomy_cleaned/taxonomy_relabund_L7_MiFish_cleaned.tsv",
     "cytb":   "results/cytb/all/taxonomy_cleaned/taxonomy_relabund_L7_cytb_cleaned.tsv",
     "18S":    "results/18S/all/taxonomy/taxonomy_relabund_L6_18S.tsv",
@@ -483,7 +485,7 @@ GENS = {
 
 def main() -> int:
     """
-    Entry point for run_all_figures_v2.py.
+    Entry point for run_all_figures.py.
 
     Reads all paths, group names, and markers from pipeline_config.yml
     via config_loader. Generates both annotated (lab) and manuscript
