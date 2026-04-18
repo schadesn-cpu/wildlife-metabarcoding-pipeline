@@ -1,6 +1,6 @@
 #!/bin/bash
 # herpes_threshold_sweep.sh
-# Run from: ~/meedlab/loon_project/
+# Run from: your project root directory
 # Usage: bash scripts/herpes_threshold_sweep.sh
 
 XLSX="metadata/loon_amplicon_analysis.xlsx"
@@ -17,7 +17,7 @@ for THRESH in 0.01 0.05 0.10 0.25 0.50 0.75; do
     echo "----------------------------------------------"
     echo "  Threshold: ${PCT}%"
     echo "----------------------------------------------"
-    python scripts/10_plot_viral.py \
+    python scripts/14_plot_viral.py \
         --xlsx "$XLSX" \
         --sheet herpes \
         --metadata "$META" \

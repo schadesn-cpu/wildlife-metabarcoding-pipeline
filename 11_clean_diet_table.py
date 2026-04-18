@@ -147,6 +147,51 @@ ARTEFACT_SPECIES: Dict[str, str] = {
     "Petromyzontidae": "Lamprey — BLAST confirmed raptor/bird genomic DNA (Buteo, Haliaeetus, Aquila); cytb avian off-target amplification",
     "Cottidae_cytb_bird": "Sculpin (cytb) — same ASV as Petromyzontidae misclassification; BLAST confirmed raptor genomic DNA (fd316c6b)",
     "Pekania":   "Fisher — terrestrial mustelid, lab contamination from concurrent fisher study (TV230067, Aug 2023)",
+
+    # ── MiFish: loon host DNA miscalled as Actinopteri (07c_blast_qc_unclassified, 2026-04-08) ──
+    # MitoFish classifier assigned these to 'Actinopteri Unclassified' because the
+    # reference database lacks a close match, but BLAST against NCBI nt confirms
+    # they are loon host DNA. Same issue previously caught for Esox ASV (7d61a0be).
+    "47dfe1c3444f51de2f0fa6a736a5f10d": "MiFish host — BLAST 100% Gavia immer; miscalled Actinopteri by MitoFish",
+    "0bed088ffd2d16c328b1e7b6ba0ab082": "MiFish host — BLAST 99.5% Gavia immer",
+    "2b8a4ea799cc5d448cfda2ae214eb7b7": "MiFish host — BLAST 99.5% Gavia immer",
+    "380f8a96ae5c968488a27c0b1009ff15": "MiFish host — BLAST 99.5% Gavia immer",
+    "53d4614b08a9ec02aa143ec85b070662": "MiFish host — BLAST 99.5% Gavia immer",
+    "b836f763bd306ce94febdbffed261629": "MiFish host — BLAST 99.5% Gavia immer",
+    "be9cc504cd63f9f1cfe30759b4c350ce": "MiFish host — BLAST 99.5% Gavia immer",
+    "cb5cc2aab919184b930f32da2378e0fc": "MiFish host — BLAST 99.5% Gavia immer",
+    "cd9dba9c4aa71dcd3aea28a7ec603150": "MiFish host — BLAST 99.5% Gavia immer",
+
+    # ── MiFish: bacterial off-targets miscalled as Actinopteri (2026-04-08) ────
+    # Gut bacteria or environmental bacteria amplified non-specifically.
+    # Not fish prey — should not contribute to dietary analysis.
+    "69c3df8be44fcbd8a4590674154ed419": "MiFish bacterial — BLAST 100% Escherichia coli",
+    "95a673720cdc3043087273271725f0e2": "MiFish bacterial — BLAST 100% Enterococcus faecium",
+    "7a16f7eb2c0dbf4ca7a4eb2ece07c052": "MiFish bacterial — BLAST 99.6% uncultured Cetobacterium sp. (fish gut bacterium, not prey)",
+    "10c100866bcf73350bd555db0b82dc9e": "MiFish bacterial — BLAST 100% Rahnella bonaserana",
+    "1d7213575a1021e657d9f87204c4510f": "MiFish bacterial — BLAST 99.6% uncultured Cetobacterium sp.",
+    "c1692fe114ff2746f989fc9e3d82fc87": "MiFish bacterial — BLAST 99.6% uncultured Cetobacterium sp.",
+
+    # ── cytb: raptor and seabird genomic DNA off-targets (2026-04-08) ──────────
+    # cytb primers amplify avian DNA broadly. These ASVs were classified as
+    # Actinopteri Unclassified but BLAST confirms raptor or seabird origin.
+    # Same mechanism as Petromyzontidae/Cottidae artefacts already above.
+    "0171a03273cc37a0f643db553029d0be": "cytb raptor — BLAST 95.7% Aquila chrysaetos (golden eagle); avian off-target",
+    "02af93f7338d144a590033f27550462d": "cytb raptor — BLAST 94.0% Astur gentilis (goshawk); avian off-target",
+    "6e0683a6c3b4d26138063f38b6af82d8": "cytb raptor — BLAST 90.6% Aquila chrysaetos; avian off-target",
+    "87d4c03b5e970246f21258b53e3501e4": "cytb raptor — BLAST 94.0% Aquila chrysaetos; avian off-target",
+    "be46264b369924778a495177df94dd39": "cytb raptor — BLAST 95.7% Aquila chrysaetos; avian off-target",
+    "64ea23a4033372a932a0b17269fb4f1c": "cytb seabird — BLAST 93.1% Calonectris borealis (Cory's shearwater); avian off-target",
+    "ffd84dc95a9fa7cbe4af4b735e17962d": "cytb shorebird — BLAST 90.5% Numenius arquata (curlew); avian off-target",
+    "04ed70995400f7c6311025b19808c4be": "cytb non-target — BLAST 79.0% Solanum tuberosum (potato); low-identity non-target",
+
+    # NOTE: the following cytb ASVs were also Actinopteri Unclassified but BLAST
+    # confirms they ARE real fish prey — classifier reference gap only. They are
+    # NOT excluded here; see TAXON_RELABELING below for correct species labels.
+    #   f56b9562 = 100% Alosa sapidissima (American shad)
+    #   06b3916d = 100% Etropus microstomus (smallmouth flounder)
+    #   9e3af85d, bb09a588 = 92-93% Sardina pilchardus (pilchard) — keep
+    #   bd6908e4, f9f999590 = 88-90% Sardina pilchardus — flag for PI (low identity)
 }
 
 # BLAST-verified taxon relabeling
@@ -163,6 +208,18 @@ TAXON_RELABELING: Dict[str, tuple] = {
         "BLAST: 99.5% Clupea harengus (Atlantic herring); Sprattus is Eastern Atlantic only"
     ),
     # Esox ASV 7d61a0be = 100% Gavia immer by BLAST — handled in host filter below
+    # ── cytb: real fish miscalled as Actinopteri Unclassified (2026-04-08) ─────
+    # These ASVs have good BLAST identity to NE Atlantic prey fish but the cytb
+    # classifier could not resolve them below class level. Relabeled here so they
+    # appear correctly in barplots rather than contributing to Actinopteri Unclassified.
+    "f56b9562c2916973c47984e18f07ba96": (
+        "k__Metazoa;p__Chordata;c__Actinopteri;o__Clupeiformes;f__Clupeidae;g__Alosa;s__sapidissima",
+        "BLAST: 100% Alosa sapidissima (American shad); cytb classifier reference gap"
+    ),
+    "06b3916dacff220d2367ab0fb21ecd08": (
+        "k__Metazoa;p__Chordata;c__Actinopteri;o__Pleuronectiformes;f__Paralichthyidae;g__Etropus;s__microstomus",
+        "BLAST: 100% Etropus microstomus (smallmouth flounder); cytb classifier reference gap"
+    ),
 }
 
 # Families to flag as potentially unexpected but not auto-remove

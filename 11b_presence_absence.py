@@ -196,20 +196,20 @@ FONT_SIZE_AXIS   = 11
 FONT_SIZE_TICK   = 9
 FONT_SIZE_LEGEND = 8.5
 
-# Group colors: match 10_plot_taxonomy.py purple palette exactly
+# Group colors: Wong 2011 colorblind-safe palette — consistent across pipeline
 GROUP_COLORS = [
-    "#7B2D8B",  # dark purple   — Group 1
-    "#C19FD8",  # lavender      — Group 2
-    "#4B1369",  # deep purple   — Group 3
-    "#D09EE0",  # light purple  — Group 4
-    "#2D0A40",  # very dark     — Group 5
-    "#E0BAEC",  # pale lavender — Group 6
-    "#9870B0",  # mid purple    — Group 7
-    "#F0D6F5",  # near-white    — Group 8
+    "#0072B2",  # blue    — Diseased
+    "#E69F00",  # orange  — Trauma
+    "#009E73",  # green   — Marine
+    "#F0E442",  # yellow  — Group 4
+    "#56B4E9",  # sky blue — Group 5
+    "#D55E00",  # vermillion — Group 6
+    "#CC79A7",  # pink    — Group 7
+    "#000000",  # black   — Group 8
 ]
 
 # Single-bar color for overall (no grouping) plots
-OVERALL_BAR_COLOR = "#7B2D8B"
+OVERALL_BAR_COLOR = "#0072B2"  # Wong blue
 
 
 # ---------------------------------------------------------------------------
@@ -588,7 +588,9 @@ def plot_detection_freq(
     (e.g. "loon", "tick", "sample").
     """
     # ── Prepare data ──────────────────────────────────────────────────────
-    plot_data = freq_df.head(top_n).copy()
+    # Drop taxa with zero detection across all samples before selecting top_n
+    freq_df_nonzero = freq_df[freq_df["detection_freq"] > 0]
+    plot_data = freq_df_nonzero.head(top_n).copy()
     pct_vals  = (plot_data["detection_freq"] * 100).values
     taxa      = plot_data.index.tolist()
     n_taxa    = len(taxa)
@@ -628,8 +630,9 @@ def plot_detection_freq(
             )
 
         ax.set_yticks(np.arange(len(taxa_order)))
+        short_labels = [shorten_taxon_label(t) for t in taxa_order]
         ax.set_yticklabels(
-            [f"$\\it{{{t}}}$" if _is_binomial(t) else t for t in taxa_order],
+            [f"$\\it{{{l}}}$" if _is_binomial(l) else l for l in short_labels],
             fontsize=FONT_SIZE_TICK,
         )
         legend = ax.legend(
@@ -650,8 +653,9 @@ def plot_detection_freq(
             color=OVERALL_BAR_COLOR, alpha=0.88,
         )
         ax.set_yticks(y_pos)
+        short_labels = [shorten_taxon_label(t) for t in taxa]
         ax.set_yticklabels(
-            [f"$\\it{{{t}}}$" if _is_binomial(t) else t for t in taxa],
+            [f"$\\it{{{l}}}$" if _is_binomial(l) else l for l in short_labels],
             fontsize=FONT_SIZE_TICK,
         )
         title_suffix = "overall"
@@ -699,6 +703,39 @@ def _is_binomial(name: str) -> bool:
     if len(parts) != 2:
         return False
     return parts[0][0].isupper() and parts[1][0].islower()
+
+
+def shorten_taxon_label(name: str) -> str:
+    """
+    Shorten a full semicolon-delimited taxonomy string to a readable label.
+
+    Handles three cases:
+      - Concatenated genus+epithet: "...;Brevoortia;Brevoortiatyrannus"
+            → "Brevoortia tyrannus"
+      - Unclassified genus:         "...;Micropterus;Unclassified"
+            → "uncl. Micropterus"
+      - Already short (no semicolons): returned unchanged.
+
+    The result is then passed through _is_binomial for italic formatting.
+    """
+    if ";" not in name:
+        return name
+    parts = [p.strip() for p in name.split(";")]
+    genus   = parts[-2] if len(parts) >= 2 else ""
+    species = parts[-1]
+
+    # Unclassified / uncl. at species level
+    if species.lower() in ("unclassified", "uncl.", "uncl"):
+        return f"uncl. {genus}"
+
+    # Concatenated genus+epithet: species starts with the genus string
+    if genus and species.lower().startswith(genus.lower()):
+        epithet = species[len(genus):]
+        if epithet:
+            return f"{genus} {epithet}"
+
+    # Fallback: just use the last segment
+    return species
 
 
 # ---------------------------------------------------------------------------
@@ -813,7 +850,10 @@ def run_presence_absence(
     pa_path = outdir / f"presence_absence_{level_tag}{marker}.tsv"
     save_tsv(pa, pa_path, dry_run)
 
-    # Overall detection frequency table
+    # Overall detection frequency table — drop zero-detection taxa
+    freq_df = freq_df[freq_df["detection_freq"] > 0]
+    if group_freq_df is not None:
+        group_freq_df = group_freq_df.loc[freq_df.index]
     freq_path = outdir / f"detection_freq_{marker}.tsv"
     save_tsv(freq_df, freq_path, dry_run)
 
