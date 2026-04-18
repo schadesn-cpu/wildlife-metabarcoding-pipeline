@@ -1,484 +1,401 @@
-# Common Loon Gut Microbiome & Dietary Metabarcoding — Project README
+# Wildlife Metabarcoding Pipeline
 
-**Last updated:** 2026-03-27
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![QIIME2 2024.5](https://img.shields.io/badge/QIIME2-2024.5-green)](https://qiime2.org)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue)](https://python.org)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
 
----
+A modular amplicon sequencing pipeline for dietary and gut community
+metabarcoding in wildlife. Built around QIIME2 (2024.5) with Python analysis
+and visualization scripts that are study-system agnostic.
 
-## Overview
-
-Amplicon sequencing study of Common Loon (*Gavia immer*) gut microbiome and dietary
-composition. Four markers sequenced: **16S rRNA** (bacteria), **MiFish 12S** (fish diet),
-**cytochrome b** (vertebrate diet), **18S rRNA** (eukaryotes/parasites — see note below).
-Viral detection via pan-herpesvirus TGF-IYG primers on lung tissue.
-
-**Analytical framework decision (2026-03-27):** MiFish and cytb results are reported as
-**presence/absence and detection frequency**, not relative abundance. Relative read
-abundance is not a defensible proxy for dietary biomass because PCR efficiency differs
-across prey taxa, mitochondrial copy number varies by tissue and species, and digestion
-state affects DNA yield independently of consumption. See Deagle et al. (2019, *Molecular
-Ecology*) for the standard treatment of this issue. cytb has the additional constraint of
-rarefaction depth 200 reads, at which relative abundance estimates have variance too large
-to be interpretable.
-
-**18S status:** Excluded from the main analysis. Primer detection returned 0% for both
-forward and reverse primers in primers_detected.tsv, indicating failed amplification or
-wrong primers. If included in any revision it is treated as explicitly exploratory.
+**Developed by:** MEED Lab, University of New Hampshire  
+**Contact:** Samantha Schade, Department of Natural Resources & the Environment  
+**Reference study:** Common Loon (*Gavia immer*) gut microbiome and dietary
+metabarcoding (Schade et al., in prep)
 
 ---
 
-## Environment Setup
+## Quick start
 
-Two conda environments — one for QIIME2 pipeline steps, one for Python analysis and
-plotting scripts.
-
-### QIIME2 environment (scripts 00–05, run_all_figures.sh)
 ```bash
-conda env create -f environment_qiime2.yml
-conda activate metabarcoding-qiime2
+# 1. Install the conda environment
+conda env create -f environment.yml
+conda activate metabarcoding-pipeline
+
+# 2. Copy the config template and edit for your project
+cp pipeline_config.yml my_project_config.yml
+# (edit: project root, markers, metadata paths, rarefaction depths, groups)
+
+# 3. Validate your config
+python pipeline.py --config my_project_config.yml check
+
+# 4. Run
+python pipeline.py --config my_project_config.yml run --steps all
+
+# 5. Regenerate all figures
+python pipeline.py --config my_project_config.yml figures
 ```
 
-### Analysis environment (scripts 06–11 and utilities)
+`pipeline_config.yml` is the only file you need to edit for a new project.
+All scripts read their parameters from it — no hardcoded project-specific
+values remain in any script.
+
+---
+
+## What this pipeline does
+
+Starting from demultiplexed FASTQ reads, this pipeline produces:
+
+- Species-level or genus-level taxonomy count tables per marker
+- Presence/absence detection tables for dietary markers with ecological
+  annotations (habitat, trophic role, lay-friendly common group labels)
+- Alpha and beta diversity analyses with group significance testing
+  (Kruskal-Wallis, PERMANOVA, PERMDISP — pairwise, BH-corrected)
+- Publication-quality figures in SVG and PNG (300 dpi) with consistent
+  Wong 2011 colorblind-safe palette throughout
+- Pre-DADA2 QC report documenting primer detection, adapter onset, dimer
+  rates, and quality drop-off per sample
+- BLAST verification reports for artefact detection and novel taxon discovery
+- Viral detection statistics (Fisher's exact + chi-square) from cutadapt
+  primer-confirmed amplicons
+
+---
+
+## Markers supported
+
+| Marker | Target | Reference database | Framework |
+|---|---|---|---|
+| 16S rRNA V4 | Bacteria (gut microbiome) | SILVA 138 (515F/806R) | Diversity (alpha/beta) |
+| MiFish 12S | Fish prey | MitoFish + optional host spike-in | Presence/absence |
+| Cytochrome b | Vertebrate prey | NCBI custom (RESCRIPt) | Presence/absence |
+| 18S rRNA V9 | Eukaryotes / parasites | PR2 v5 | Presence/absence (exploratory) |
+| ITS1-2 | Fungi | UNITE v10 | See note below |
+| COI | Invertebrates | MIDORI2 UNIQ NUC | Presence/absence |
+| Adenovirus | Avian adenovirus (hexon) | NCBI custom BLAST DB | Presence/absence |
+| Herpesvirus | Herpesvirus DPOL | Cutadapt primer-confirmed | Presence/absence |
+
+**Note on ITS1-2:** Fungal metabarcoding from gut contents of piscivorous
+species typically yields insufficient read depth for diversity analysis. In
+the loon study, mean DADA2 retention was 16.6% with NTC contamination
+comparable to biological samples. ITS is appropriate for herbivores or
+omnivores with dietary fungal components but not for fish-eating birds. If
+you attempt ITS, run `00_build_classifiers.py --markers ITS` and check NTC
+read counts via `05b_parse_dada2_retention.py` before proceeding.
+
+---
+
+## The key analytical decision: presence/absence vs relative abundance
+
+For dietary markers (MiFish, cytb), both frameworks have merit and should be
+reported when they disagree.
+
+Clucas et al. (2024, bioRxiv 10.1101/2024.03.22.586275) validated that MiFish
+12S relative read abundance correlates r=0.94 with prey biomass proportions in
+wild piscivorous seabirds in the Gulf of Maine — the same ecosystem and primer
+as the loon study. Deagle et al. (2019, Mol Ecol 28:391-406) showed through
+simulation that frequency of occurrence systematically overestimates rare prey
+items.
+
+**Recommended approach:** Report rarefied relative abundance as the primary
+analysis for MiFish (supported by Clucas et al. 2024) and binary
+presence/absence as a secondary comparison. When the two frameworks disagree,
+report both and interpret the discrepancy.
+
+**For cytb:** Binary presence/absence is preferred at low rarefaction depths
+(200 reads) where relative abundance estimates have variance too large to be
+meaningfully interpreted.
+
+**For microbiome markers (16S, 18S):** Use standard diversity analysis.
+
+---
+
+## Pipeline steps
+
+Steps are run in order by `pipeline.py run --steps all`, or individually:
+
+```
+qc        Pre-DADA2 QC: primer detection + demux report
+import    Merge sequencing runs + QIIME2 manifests + import FASTQs
+denoise   Cutadapt primer trimming + DADA2 denoising
+taxonomy  Taxonomic classification + export count tables
+diversity Rarefaction curves + core-metrics + group significance tests
+cod       Cause-of-death stratified diversity (secondary analysis)
+figures   All publication figures (annotated and manuscript sets)
+```
+
+Each step is idempotent — re-running skips files that already exist.
+Use `--force` to overwrite. Use `--dry-run` to preview commands.
+
+---
+
+## Three worked examples
+
+### Example 1: Common Loon gut contents (multi-marker, aquatic piscivore)
+
+**Study design:** n=40 loons (NH/ME 2022–2025); n=35 with gastrointestinal
+tissue (16S, MiFish, cytb, 18S); n=40 with lung tissue (herpesvirus,
+adenovirus). 5 loons had lung tissue only — the pipeline handles uneven
+marker coverage across samples gracefully.
+
+**Key decisions:**
+- MiFish and cytb → presence/absence (Deagle et al. 2019)
+- cytb rarefaction depth = 200 reads (constrained by sample depth)
+- MiFish rarefaction depth = 17,000 reads; 16S = 8,000 reads
+- Host spike-in classifier: loon 12S sequences added to MitoFish via
+  `00_build_classifiers.py --markers MiFish --add-gavia`
+- TV250064 excluded from MiFish (contamination confirmed: 226k reads
+  dominated by Indo-Pacific taxa not present in New England loon diet)
+
+**Typical output:** Jaccard PERMANOVA Diseased vs Trauma p=0.002 (MiFish);
+Lead vs Trauma dietary composition p=0.002 surviving BH correction.
+
+---
+
+### Example 2: Tick blood meal identification (single marker, single host)
+
+**Study design:** DNA from individual ticks (*Ixodes scapularis*), cytb
+amplification to identify vertebrate host.
+
+**Key decisions:**
+- Single marker only — you are identifying one host, not a diet community
+- Do NOT use the presence/absence framework — report the dominant signal
+- Many samples will fail the minimum read threshold; plan for high dropout
+- Exclude tick mitochondrial sequences: `--exclude Acari` in
+  `07_taxonomy_table.py`
+- Raise classifier confidence threshold: `--p-confidence 0.8`
+
 ```bash
-conda env create -f environment_analysis.yml
-conda activate metabarcoding-analysis
+python scripts/07_taxonomy_table.py \
+    --taxonomy  qiime2/cytb/tick/taxonomy/taxonomy.qza \
+    --table     qiime2/cytb/tick/dada2/table.qza \
+    --marker    cytb \
+    --include   Chordata \
+    --exclude   Acari,Arachnida,Bacteria,Viruses,Archaea \
+    --outdir    results/cytb/tick/taxonomy/
 ```
+
+**Note:** Tick samples often contain human handler DNA. Add `Hominidae`
+to your exclude list and log the removal.
 
 ---
 
-## Sample Groups
+### Example 3: Fisher scat (terrestrial predator, mixed prey)
 
-| Group | n (rarefied) | Notes |
-|---|---|---|
-| Diseased | 13 (16S/MiFish/cytb) | Lead toxicosis or infectious disease COD |
-| Trauma | 13 (16S/MiFish/cytb) | Trauma COD |
-| Marine | 3–5 | Excluded from DvT diversity analyses |
+**Study design:** Fisher (*Pekania pennanti*) scat, MiFish + cytb, generalist
+carnivore diet.
 
-Three samples dropped at rarefaction (8,000 reads): TV240046 (Diseased), TV230067 + TV240036 (Trauma).
-Marine samples (TV220031, TV230063, TV240057) excluded from 16S/MiFish/cytb DvT diversity.
-
-**18S sample counts (rarefaction depth 1,000):** n=13 Diseased + 12 Trauma + 5 Marine = 30 total.
-⚠ Note: Verify final 18S n — two samples may lack Collection_source values; expected n=30.
+**Key decisions:**
+- cytb is more informative than MiFish for terrestrial prey — many prey
+  items (squirrels, voles, rabbits, grouse) will not be amplified by MiFish
+- Presence/absence framework (same rationale as loon dietary markers)
+- Update `HOST_TAXON_STRINGS` in `11_clean_diet_table.py` for Mustelidae
+- Cervidae and Leporidae are real prey — do NOT add to artefact list
+- Update `PREY_LOOKUP` in `10b_annotate_diet_ecology.py` with terrestrial
+  prey categories (the script header has a worked coyote scat example)
 
 ---
 
-## Directory Structure
+## Adapting for a new study system
 
-### Important: Two-phase artifact layout
+### 1. Edit `pipeline_config.yml`
 
-The project was run in two phases with different directory conventions. Know which
-phase each marker belongs to before pointing scripts at paths.
+```yaml
+project:
+  name: "my_study"
+  root: "."
+  email: "your@institution.edu"
 
-**Phase 1 — flat structure (16S, 18S, ITS, original MiFish/cytb runs):**
+samples:
+  id_regex: "(MYID\\d+)"   # regex to extract short ID from QIIME2 sample names
+  control_prefixes: ["NTC-", "BLK-"]
+
+active_markers: ["16S", "MiFish"]
+
+markers:
+  16S:
+    classifier: "classifiers/silva-138-99-nb-classifier-515-806.qza"
+    rarefaction_depth: 8000
+    phylo: true
+  MiFish:
+    classifier: "classifiers/mitofish-12S-mifish-classifier.qza"
+    rarefaction_depth: 5000
+    phylo: false
+
+groups:
+  primary:
+    column: "Group"
+    order: ["Treatment", "Control"]
 ```
-qiime2/dada2/        ← table_16S.qza, rep-seqs_16S.qza, table_Mifish.qza, table_cytb.qza
-qiime2/imported/     ← demux_{marker}.qza, manifest_{marker}.tsv
-qiime2/taxonomy/     ← taxonomy_16S_silva138_v4.qza, taxonomy_18S.qza (flat, no subdirs)
+
+### 2. Adapt the host filter
+
+Edit `HOST_TAXON_STRINGS` in `11_clean_diet_table.py`:
+
+```python
+# Loon default:
+HOST_TAXON_STRINGS = {"MiFish": ["Gaviidae"], "cytb": ["Gaviidae", "Aves"]}
+
+# Fisher scat:
+HOST_TAXON_STRINGS = {"cytb": ["Mustelidae", "Pekania"]}
+
+# Tick blood meal:
+HOST_TAXON_STRINGS = {"cytb": ["Acari", "Ixodidae"]}
 ```
 
-**Phase 2 — nested structure (MiFish and cytb reruns — use these):**
-```
-qiime2/MiFish/all/dada2/table.qza
-qiime2/MiFish/all/taxonomy/taxonomy.qza
-qiime2/cytb/all/dada2/table.qza
-qiime2/cytb/all/taxonomy/taxonomy.qza
-```
+### 3. Adapt the ecological annotation lookup
 
-**16S:** All artifacts in Phase 1 flat structure. Always use
-`qiime2/taxonomy/taxonomy_16S_silva138_v4.qza` (V4-specific, 515F/806R region).
-**Never** use the full-length `taxonomy_16S_silva138.qza` for this data — genus
-resolution drops from ~50% to <1%.
+Update `PREY_LOOKUP` in `10b_annotate_diet_ecology.py` with your prey
+categories. The script header has step-by-step instructions and a worked
+coyote scat example. Each entry maps to three values:
+`(habitat_or_origin, trophic_role, common_group)`.
 
-**cytb notrim:** The cytb taxonomy results are under `results/cytb/all/taxonomy/notrim/`.
-This is correct — cytb was not run through cutadapt by design. L14841/H15149 primers
-(35 + 34 bp) plus the ~307 bp amplicon = ~376 bp total insert, which exceeds the 250 bp
-read length. No adapter bleed-through occurs. This is documented, not a bug.
+### 4. Adding a new marker
 
-### Full project tree
+1. Add marker block to `pipeline_config.yml`
+2. Train classifier: `python 00_build_classifiers.py --markers YOURMARKER`
+3. Run pipeline: `python pipeline.py run --steps all`
+4. Choose rarefaction depth from `06_rarefaction.py` output
+5. For dietary markers: run `11_clean_diet_table.py` →
+   `11b_presence_absence.py` → `10b_annotate_diet_ecology.py`
+6. Optional BLAST verification: `07c_blast_qc_unclassified.py` for poorly
+   classified ASVs; `08c_blast_verify.py` for suspect taxa by name
+
+---
+
+## Project directory structure
+
 ```
 project_root/
+├── pipeline_config.yml          ← edit this for your project
+├── pipeline.py                  ← main entry point
+├── environment.yml              ← conda environment
+├── reads/                       ← demultiplexed FASTQs
+├── classifiers/                 ← QIIME2 classifier QZAs
 ├── metadata/
-│   └── qiime/
-│       ├── metadata_{marker}.tsv              ← QIIME2 metadata (DvT analyses)
-│       ├── metadata_{marker}_cod.tsv          ← with COD_broad + Collection_source
-│       └── metadata_cytb_cod_filtered.tsv     ← Lead + Parasitic_Infectious + Trauma only
-├── qiime2/                                    ← QIIME2 artifacts (.qza/.qzv)
-│   ├── dada2/                                 ← Phase 1: 16S, 18S, ITS flat artifacts
-│   ├── imported/                              ← Phase 1: demux QZAs, manifests
-│   ├── taxonomy/                              ← Phase 1: taxonomy QZAs
-│   ├── 16S/rarefied_8000/DvT/diversity/core_metrics_depth8000/
-│   ├── MiFish/all/dada2/ + taxonomy/          ← Phase 2: use these for MiFish
-│   ├── MiFish/rarefied_17000/DvT/diversity/core-metrics-17000/
-│   ├── cytb/all/dada2/ + taxonomy/            ← Phase 2: use these for cytb
-│   ├── cytb/all/diversity/core-metrics-200/
-│   ├── 18S/all/dada2/ + taxonomy/             ← exists but 18S excluded from main analysis
-│   ├── 18S/all/diversity/core-metrics-1000/
-│   └── cytb/COD/                              ← filtered distance matrices for cytb COD stats
+│   ├── source_metadata.csv      ← your source-of-truth metadata
+│   └── qiime/                   ← QIIME2-ready TSVs (built by pipeline)
+├── qiime2/
+│   └── {marker}/all/
+│       ├── dada2/               ← table.qza, rep-seqs.qza
+│       ├── taxonomy/            ← taxonomy.qza
+│       └── diversity/           ← core-metrics output
 ├── results/
-│   ├── 16S/
-│   │   ├── DvT/{diversity,figures,taxonomy}/
-│   │   ├── season/{diversity,figures}/
-│   │   └── COD/{diversity,figures}/
-│   ├── MiFish/
-│   │   ├── all/taxonomy/                      ← taxonomy_counts_L7_MiFish.tsv (source for PA)
-│   │   ├── all/presence_absence/              ← 08b output (detection freq, binary table)
-│   │   ├── DvT/{diversity,figures}/
-│   │   ├── season/{diversity,figures}/
-│   │   └── COD/{diversity,figures}/
-│   ├── cytb/
-│   │   ├── all/taxonomy/notrim/               ← taxonomy_counts_L7_cytb.tsv (source for PA)
-│   │   ├── all/presence_absence/              ← 08b output (detection freq, binary table)
-│   │   ├── DvT/{diversity,figures}/
-│   │   ├── season/{diversity,figures}/
-│   │   └── COD/{diversity,figures}/
-│   ├── 18S/all/{diversity,figures,taxonomy}/  ← exists; excluded from main analysis
-│   ├── herpesvirus/figures/
-│   ├── adenovirus/figures/
-│   ├── qc/                                    ← demux_qc_report.txt + .tsv (new)
-│   └── _archive_old_structure/
+│   └── {marker}/
+│       ├── all/taxonomy/        ← taxonomy count TSVs
+│       ├── all/taxonomy_cleaned/← cleaned count TSVs
+│       ├── all/presence_absence/← binary detection table
+│       ├── all/taxonomy_annotated/ ← with common_group labels
+│       ├── DvT/diversity/       ← PERMANOVA/PERMDISP QZVs
+│       └── DvT/figures/         ← PCoA + alpha plots
+├── manuscript_figures/          ← assembled by build_manuscript_figures.sh
 ├── reports/
-│   ├── primers_detected.tsv                   ← from primer_advisor detect --all
+│   ├── primers_detected.tsv
 │   └── demultiplex/
-│       ├── Demultiplex_Stats.csv
-│       └── additional-reports/
-│           ├── Adapter_Metrics.csv
-│           ├── Adapter_Cycle_Metrics.csv
-│           └── multiqc_data/
-│               ├── fastqc_adapter_content_plot.txt
-│               └── fastqc_per_base_sequence_quality_plot.txt
+├── logs/
 └── scripts/
     ├── 00_build_classifiers.py
-    ├── 00a_primer_advisor.py                  ← primer detect + suggest + check subcommands
-    ├── 01_make_manifests.py
-    ├── 02_make_qiime_metadata.py
-    ├── 03_run_full_metabarcoding_pipeline.py
-    ├── 04_rarefaction.py
-    ├── 08_run_diversity_stats.py
-    ├── 05b_run_cod_diversity.py               ← (fixed: sys.executable + relative path)
-    ├── 09_plot_diversity.py                   ← (fixed: PERMANOVA parser no longer silent)
+    ├── 04d_primer_advisor.py
+    ├── 04e_parse_multiqc_demux.py
+    ├── 05_run_full_metabarcoding_pipeline.py
+    ├── 05b_parse_dada2_retention.py
+    ├── suggest_dada2_params.py
+    ├── 06_rarefaction.py
     ├── 07_taxonomy_table.py
-    ├── 11b_presence_absence.py                ← universal PA; use for MiFish + cytb
-    ├── 10_plot_taxonomy.py
-    ├── 10_plot_viral.py
-    ├── 11_plot_mifish_season_ecology.py
-    ├── add_season_to_metadata.py              ← (fixed: bad dates now logged with sample ID)
-    ├── parse_beta_stats.py
-    ├── parse_multiqc_demux.py                 ← NEW: QC report from Illumina/MultiQC data
-    ├── plot_adeno_tree.py                     ← (fixed: bootstrap label loop)
-    ├── run_all_figures.sh
-    ├── scan_files.py                          ← (fixed: PermissionError now logged)
-    └── _archive/
-        ├── 09c_visualize_diversity.py          ← retired; superseded by 09_plot_diversity.py
-        ├── combine_multimarker_alpha.py       ← retired; use 06_ --panel instead
-        ├── parse_demux_report.py              ← retired; absorbed into primer_advisor check
-        ├── reorganize_loon.sh                 ← one-time migration, complete
-        └── reorganize_results.sh             ← one-time migration, complete
+    ├── 08_run_diversity_stats.py
+    ├── 08b_run_cod_diversity.py
+    ├── 08c_parse_beta_stats.py
+    ├── 09_plot_diversity.py
+    ├── 09_plot_taxonomy.py
+    ├── 11_clean_diet_table.py
+    ├── 11b_presence_absence.py
+    ├── 11c_annotate_diet_ecology.py
+    ├── 13_plot_habitat_season.py
+    ├── plot_mifish_ecology_pa.py
+    ├── 14_viral_stats.py
+    ├── 14b_plot_adeno_tree.py
+    ├── 14c_plot_herpes_cutadapt.py
+    ├── build_manuscript_figures.sh
+    ├── run_all_figures.py
+    └── _archive/                ← retired scripts
 ```
 
 ---
 
-## Pre-DADA2 QC Workflow
+## Key scripts reference
 
-Three steps run before DADA2. All require the `metabarcoding-analysis` environment
-(no QIIME2 needed).
-
-### Step 1 — Detect primers from raw reads
-```bash
-python scripts/00a_primer_advisor.py detect \
-    --all \
-    --reads-dir reads/ \
-    --report reports/primers_detected.tsv
-```
-
-### Step 2 — Suggest DADA2 parameters from demux QZV
-```bash
-python scripts/00a_primer_advisor.py suggest \
-    --demux    qiime2/imported/demux_MiFish.qza \
-    --marker   MiFish \
-    --primer-f 21 --primer-r 27 \
-    --amplicon-length 180
-```
-
-### Step 3 — QC report from Illumina demultiplex + MultiQC data
-Run after cutadapt (or in this project's case, after demultiplexing when no cutadapt
-logs exist). Reads the reports/ directory directly.
-```bash
-mkdir -p logs results/qc
-
-python scripts/parse_multiqc_demux.py \
-    --reports-dir  reports/ \
-    --primers      reports/primers_detected.tsv \
-    --amplicon-lens 16S=253,MiFish=180,cytb=307,Virus=110 \
-    --min-reads    10000 \
-    --out-txt      results/qc/demux_qc_report.txt \
-    --out-tsv      results/qc/demux_qc_report.tsv
-```
-
-Note: amplicon lengths in parse_multiqc_demux.py are loon-project-specific defaults
-(`LOON_PROJECT_AMPLICON_LENS`). Verify before use on any other project.
-
----
-
-## Presence/Absence Analysis (MiFish and cytb)
-
-`11b_presence_absence.py` converts taxonomy count tables to binary presence/absence
-and computes detection frequencies per group. Use this — not relative abundance — for
-MiFish and cytb results.
-
-```bash
-# MiFish
-nohup python scripts/11b_presence_absence.py \
-    --counts            results/MiFish/all/taxonomy/taxonomy_counts_L7_MiFish.tsv \
-    --metadata          metadata/qiime/metadata_MiFish.tsv \
-    --marker            MiFish \
-    --group-by          Group \
-    --min-sample-reads  10000 \
-    --min-taxon-reads   10 \
-    --min-relabund      0.01 \
-    --sample-label      loon \
-    --outdir            results/MiFish/all/presence_absence/ \
-    > logs/mifish_presence_absence.log 2>&1 &
-
-# cytb — thresholds set to match rarefaction depth of 200 reads
-# --min-relabund 0.01 requires >=2 reads for a detection call at this depth
-nohup python scripts/11b_presence_absence.py \
-    --counts            results/cytb/all/taxonomy/notrim/taxonomy_counts_L7_cytb.tsv \
-    --metadata          metadata/qiime/metadata_cytb.tsv \
-    --marker            cytb \
-    --group-by          Group \
-    --min-sample-reads  50 \
-    --min-taxon-reads   5 \
-    --min-relabund      0.01 \
-    --sample-label      loon \
-    --outdir            results/cytb/all/presence_absence/ \
-    > logs/cytb_presence_absence.log 2>&1 &
-```
-
----
-
-## Figure Naming Convention
-
-```
-{marker}_r{rarefaction}_{dataset}_{type}_{palette}.png/svg
-```
-
-Examples:
-- `16S_r8000_DvT_pcoa_purple.png`
-- `MiFish_r17000_season_alpha_wong.svg`
-- `cytb_r200_DvT_pcoa_wong.png`
-
-Barplots: `{marker}_unrarefied_{dataset}_barplot_{palette}.png/svg`
-
-COD figures: `{marker}_r{depth}_cod_{type}_{palette}.png/svg`
-
-Viral figures: `herpes_{type}_{palette}.png/svg`, `adeno_{type}_{palette}.png/svg`
-
----
-
-## Rarefaction Depths
-
-| Marker | Depth | DvT n | Notes |
+| Script | Purpose | Input | Output |
 |---|---|---|---|
-| 16S | 8,000 reads | 13+13 | 3 samples dropped |
-| MiFish | 17,000 reads | 13+13 | Unrarefied: 14+16 |
-| cytb | 200 reads | 13+15 | Single-end mode; Marine excluded |
-| 18S | 1,000 reads | 13+12+5 | Excluded from main analysis |
+| `pipeline.py` | Main entry point | `pipeline_config.yml` | Orchestrates all steps |
+| `00_build_classifiers.py` | Train classifiers + BLAST DBs | Reference FASTA | `classifier.qza` / BLAST DB |
+| `04d_primer_advisor.py` | Pre-DADA2 QC | Raw FASTQs | `primers_detected.tsv` |
+| `04e_parse_multiqc_demux.py` | Demux QC report | Illumina demux + MultiQC | `demux_qc_report.txt` |
+| `04_make_qiime_metadata.py` | QIIME2 metadata builder | Source CSV + feature table | `metadata_{marker}.tsv` |
+| `05_run_full_metabarcoding_pipeline.py` | Import → DADA2 → taxonomy | Reads + classifier | QIIME2 artifacts |
+| `05b_parse_dada2_retention.py` | Post-DADA2 bottleneck detection | `denoising-stats.qza` | Retention report |
+| `suggest_dada2_params.py` | DADA2 parameter advisor | demux QZV + primer/amplicon lengths | Ready-to-paste DADA2 command |
+| `06_rarefaction.py` | Rarefaction guidance | Feature table | Curves + depth recommendation |
+| `07_taxonomy_table.py` | Taxonomy count table | Taxonomy + table QZAs | Count + relabund TSVs |
+| `07c_blast_qc_unclassified.py` | BLAST QC for unresolved ASVs | Rep-seqs + taxonomy | BLAST QC report |
+| `08_run_diversity_stats.py` | PERMANOVA + Kruskal-Wallis | Core-metrics + metadata | Stats QZVs |
+| `08b_run_cod_diversity.py` | COD-stratified diversity | Core-metrics + COD metadata | Stats QZVs |
+| `08c_parse_beta_stats.py` | Parse QZV stats to TSV | Results directory | Summary TSV with sig stars |
+| `08c_blast_verify.py` | Verify suspect taxa by name/reads | Rep-seqs + taxonomy | AGREE/DISAGREE report |
+| `09_plot_diversity.py` | PCoA + alpha figures | Core-metrics QZAs | PNG + SVG |
+| `09_plot_taxonomy.py` | Taxonomy barplots | Relabund TSV + metadata | PNG + SVG |
+| `11_clean_diet_table.py` | Remove host/artefacts + log | Count TSV | Cleaned TSV + cleaning report |
+| `11b_presence_absence.py` | Detection frequency analysis | Cleaned TSV + metadata | Binary table + barplot |
+| `11c_annotate_diet_ecology.py` | Ecological annotations | Cleaned TSV | Annotated TSV |
+| `13_plot_habitat_season.py` | Habitat by season figure | Annotated TSV + metadata | PNG + SVG |
+| `plot_mifish_ecology_pa.py` | Detection frequency by season and COD | PA table + annotation + metadata | PNG + SVG |
+| `14_viral_stats.py` | Viral Fisher's exact + chi-square | Excel workbook + metadata | Stats TSV |
+| `14b_plot_adeno_tree.py` | Adenovirus phylogenetic tree | IQ-TREE Newick | PNG + SVG |
+| `14c_plot_herpes_cutadapt.py` | Herpesvirus detection figures | Cutadapt summary + metadata | PNG + SVG |
+| `run_all_figures.py` | Regenerate all figures | Config | Full figure sets |
+| `build_manuscript_figures.sh` | Assemble numbered figure directory | Results | `manuscript_figures/` |
 
 ---
 
-## Confirmed Statistics
+## Citation
 
-### 16S Alpha Diversity (Mann-Whitney U, DvT n=13+13)
-| Metric | p | Sig |
-|---|---|---|
-| Faith's PD | 0.720 | ns |
-| Shannon | 0.505 | ns |
-| Observed Features | 0.682 | ns |
-| Pielou's Evenness | 0.473 | ns |
+If you use this pipeline, please cite:
 
-### 16S Beta Diversity PERMANOVA + PERMDISP
-| Metric | F | p | PERMDISP p |
-|---|---|---|---|
-| Unweighted UniFrac | 1.154 | 0.059 ns | 0.166 ns |
-| Weighted UniFrac | 1.176 | 0.308 ns | 0.091 ns |
-| Bray-Curtis | 1.427 | 0.088 ns | **0.013*** (dispersion confound — caveat) |
-| Jaccard | 1.139 | **0.012*** | 0.495 ns |
+> Schade SN et al. (in prep). Lead toxicosis disrupts foraging ecology and gut
+> microbiome diversity in Common Loons (*Gavia immer*): a multi-marker
+> metabarcoding study. MEED Lab, University of New Hampshire.
 
-### MiFish PERMANOVA (DvT n=13+13)
-| Metric | F | p |
-|---|---|---|
-| Bray-Curtis | 2.268 | **0.017*** |
-| Jaccard | 1.577 | **0.002*** |
+And cite the pipeline itself:
 
-⚠ MiFish diversity stats above are from rarefied relative abundance analysis.
-Presence/absence (Jaccard on binary table) will be rerun via 08b and 08_run_diversity_stats.py.
-These p-values may change slightly — update this table when complete.
+> Schade SN (2026). Wildlife Metabarcoding Pipeline v1.0.0. MEED Lab,
+> University of New Hampshire. https://doi.org/10.5281/zenodo.XXXXXXX
 
-### MiFish Alpha (DvT)
-| Metric | p |
-|---|---|
-| Observed Features | **0.019*** |
-| Shannon | 0.059 (trend) |
-| Pielou's Evenness | 0.065 |
+Please also cite the key frameworks this pipeline depends on:
 
-### cytb PERMANOVA (DvT n=13+15)
-| Metric | F | p |
-|---|---|---|
-| Bray-Curtis | 1.200 | 0.085 ns |
-| Jaccard | 1.185 | **0.025*** |
+> Deagle BE, Thomas AC, McInnes JC, et al. (2019). Counting with DNA in
+> metabarcoding studies: How should we convert sequence reads to dietary data?
+> *Molecular Ecology*, 28(2), 391–406.
 
-⚠ cytb diversity stats above are from rarefied relative abundance analysis.
-Presence/absence rerun pending — update when complete.
+> Callahan BJ, McMurdie PJ, Rosen MJ, et al. (2016). DADA2: High-resolution
+> sample inference from Illumina amplicon data. *Nature Methods*, 13, 581–583.
 
-### cytb Alpha (DvT)
-| Metric | p |
-|---|---|
-| Observed Features | **0.019*** |
-| Shannon | **0.043*** |
-| Pielou's Evenness | 0.167 ns |
+> Bolyen E, Rideout JR, Dillon MR, et al. (2019). Reproducible, interactive,
+> scalable and extensible microbiome data science using QIIME 2.
+> *Nature Biotechnology*, 37, 852–857.
 
-### 18S PERMANOVA (all groups n=13+12+5) — exploratory only
-| Metric | F | p |
-|---|---|---|
-| Bray-Curtis | 1.093 | 0.146 ns |
-| Jaccard | 1.053 | **0.029*** |
-
-### MiFish COD_broad Analysis (Lead / Parasitic_Infectious / Trauma)
-| Test | Metric | F | p | Notes |
-|---|---|---|---|---|
-| PERMANOVA overall | Jaccard | 1.255 | **0.009*** | 3-group |
-| Lead vs Trauma pairwise | Jaccard | 1.555 | **0.002*** | q=0.012 — survives FDR |
-| Parasitic vs Trauma | Jaccard | — | 0.029* | q=0.087 ns — does not survive FDR |
-| Lead vs Parasitic | Jaccard | — | 0.207 ns | disease subgroups do not differ |
-| Alpha Observed Features | — | — | **0.029*** | after removing Unknown_Other |
-
-⚠ cytb and 18S COD_broad p-values pending (see Pending Tasks).
-
-### Collection_source Confound Check (all markers confirmed ✓)
-| Marker | Metric | PERMANOVA p | PERMDISP p | Notes |
-|---|---|---|---|---|
-| 16S | Bray-Curtis | 0.163 ns | **0.035*** | Dispersion differs — note limitation |
-| 16S | Jaccard | 0.148 ns | ns | |
-| 18S | Bray-Curtis | 0.188 ns | ns | |
-| 18S | Jaccard | 0.056 ns (trend) | ns | CFW vs NHVDL pairwise p=0.040, q=0.120 |
-| MiFish | Bray-Curtis | 0.196 ns | ns | |
-| MiFish | Jaccard | 0.076 ns | ns | **CFW vs NHVDL pairwise q=0.048*** — note limitation |
-| cytb | Bray-Curtis | 0.321 ns | ns | Cleanest result |
-| cytb | Jaccard | 0.107 ns | ns | |
-
-### Herpesvirus Detection (TGF-IYG, lung n=40)
-- No-hit reads (putative novel herpesvirus): Diseased 19/19, Trauma 16/16
-- Fisher's exact p=1.000 — ubiquitous detection, not disease-associated
-
-### Aviadenovirus Detection (TGF-IYG amplicon, lung n=40)
-- Classified reads matching Aviadenovirus: 2 OTUs at low prevalence
-- Diseased: 2/19, Trauma: 1/16 — Fisher's exact p=1.000
-- Top BLAST hits: ~77% identity to uncharacterized Aviadenovirus spp. (below 85% species threshold)
-- Interpretation: putative novel aviadenovirus species
+> Wong B (2011). Points of view: Color blindness. *Nature Methods*, 8, 441.
 
 ---
 
-## Pending Tasks
+## License
 
-**Blocking manuscript:**
-- [ ] Run 11b_presence_absence.py for MiFish and cytb — generate detection_freq TSVs and
-      binary presence/absence tables (commands above)
-- [ ] Rerun Jaccard PERMANOVA on binary presence/absence table for MiFish and cytb —
-      update stats tables above with new p-values
-- [ ] Run taxonomy test run for 16S (table_16S.qza + taxonomy_16S_silva138_v4.qza) —
-      first time 16S taxonomy table has been generated; check output before using
-- [ ] Upload cytb COD_broad PERMANOVA QZVs and extract p-values
-- [ ] Upload 18S COD_broad PERMANOVA QZVs and extract p-values
-- [ ] Verify 18S n=28 vs expected n=30 — check metadata_18S_cod.tsv for missing Collection_source
-- [ ] Run parse_multiqc_demux.py QC report — document demux QC in results/qc/
-- [ ] Update results.docx — add COD findings, herpesvirus ubiquity, adenovirus novelty,
-      collection_source caveats, presence/absence framework for MiFish/cytb
-- [ ] Update abstracts_three_versions.docx — add COD p-values and viral findings
+MIT License — see [LICENSE](LICENSE).
 
-**Near-term:**
-- [ ] Adenovirus phylogenetic tree — MAFFT alignment + FastTree NJ; supports novelty claim
-- [ ] 10_plot_viral.py — add --signal-mode, --taxon-filter, --min-reads flags for
-      adenovirus support (currently only supports no-hit signal mode)
-- [ ] Partial PERMANOVA (adonis) controlling for Season — MiFish and cytb
-- [ ] Fill manuscript placeholders — institution, extraction protocol, PCR params, citations
-- [ ] Install openpyxl (conda clone env or pip --user + PYTHONPATH fix)
-- [ ] Graduate Research Conference poster — incorporate COD + viral findings
-- [ ] Decide 18S fate: explicitly exploratory (state limitations) or excluded entirely
-
-**Completed this session (2026-03-27):**
-- [x] Analytical decision: MiFish and cytb → presence/absence (Deagle et al. 2019)
-- [x] 18S exclusion confirmed — 0%/0% primer detection in primers_detected.tsv
-- [x] parse_multiqc_demux.py written — reads Illumina demux + MultiQC data directly
-- [x] 11b_presence_absence.py made universal — added --sample-label, removed dead code,
-      renamed project-specific defaults
-- [x] primer_advisor.py updated — added check subcommand for post-cutadapt QC
-- [x] Bug fixes: 06_plot_diversity (silent except), 07_visualize_diversity (dead branch),
-      05b_run_cod_diversity (hard-coded paths), add_season_to_metadata (silent date parse),
-      scan_files (undifferentiated exception handler), plot_adeno_tree (exception as type probe)
-- [x] Scripts archived: reorganize_loon.sh, reorganize_results.sh,
-      combine_multimarker_alpha.py, parse_demux_report.py
-- [x] Project structure fully audited — two-phase layout documented
-- [x] Lab notebook sprint entry written (sprint_notebook.docx)
-
-**Completed previous session (2026-03-19):**
-- [x] All DvT + season diversity figures regenerated (purple + wong, standardized filenames)
-- [x] COD_broad + Collection_source stats run for all markers (MiFish complete; cytb/18S QZVs need upload)
-- [x] Collection_source confound check — all markers confirmed ns except noted caveats
-- [x] Herpesvirus figures generated (both palettes)
-- [x] Adenovirus figures generated (both palettes)
-- [x] BLAST results for aviadenovirus OTUs — novelty claim supported
-- [x] cytb barplot verified
-- [x] MiFish barplot verified
+Reference databases (SILVA, UNITE, MitoFish, PR2, MIDORI2, NCBI) are subject
+to their own licensing terms; see LICENSE for details.
 
 ---
 
-## Running the Pipeline
+## Contact
 
-### Generate all diversity figures (both palettes)
-```bash
-conda activate metabarcoding-analysis
-bash scripts/run_all_figures.sh
-```
-
-### Run COD_broad + Collection_source diversity stats and figures
-```bash
-conda activate metabarcoding-qiime2
-python scripts/05b_run_cod_diversity.py \
-    --marker MiFish \
-    --metrics-dir qiime2/MiFish/rarefied_17000/DvT/diversity/core-metrics-17000 \
-    --metadata metadata/qiime/metadata_MiFish_cod_filtered.tsv \
-    --group-column COD_broad
-```
-
-### Generate viral detection figures
-```bash
-conda activate metabarcoding-analysis
-# Herpesvirus (no-hit signal):
-python scripts/10_plot_viral.py \
-    --xlsx loon_amplicon_analysis.xlsx --sheet herpes \
-    --metadata metadata/qiime/metadata_16S.tsv \
-    --palette purple --outdir results/herpesvirus/figures
-
-# Adenovirus: requires --signal-mode update to 10_plot_viral.py (see Pending Tasks)
-```
-
-### Regenerate a single marker/dataset figure
-```bash
-python scripts/09_plot_diversity.py pcoa \
-    --artifact qiime2/MiFish/rarefied_17000/DvT/diversity/core-metrics-17000/bray_curtis_pcoa_results.qza \
-               qiime2/MiFish/rarefied_17000/DvT/diversity/core-metrics-17000/jaccard_pcoa_results.qza \
-    --metadata metadata/qiime/metadata_MiFish.tsv \
-    --color-by Group --panel --palette wong --no-title \
-    --stats-dir results/MiFish/DvT/diversity \
-    --output-stem MiFish_r17000_DvT_pcoa_wong \
-    --output-dir results/MiFish/DvT/figures
-```
-
-### Taxonomy table (16S — flat structure, V4 classifier)
-```bash
-conda activate metabarcoding-analysis
-python scripts/07_taxonomy_table.py \
-    --taxonomy  qiime2/taxonomy/taxonomy_16S_silva138_v4.qza \
-    --table     qiime2/dada2/table_16S.qza \
-    --marker    16S \
-    --outdir    results/16S/all/taxonomy/
-```
+Open a GitHub issue or contact the MEED Lab at the University of New Hampshire
+for questions about adapting this pipeline to new study systems.
