@@ -471,7 +471,7 @@ def match_sample_ids(
     """
     Match QIIME2 artifact sample IDs to metadata rows.
 
-    Handles the common loon project pattern where artifact IDs look like
+    Handles the common pipeline pattern where artifact IDs look like
     'TV230007-GI-16S_S1483_L002' but metadata uses short IDs like 'TV230007'.
 
     Matching strategy (in priority order):
@@ -803,7 +803,7 @@ def plot_pcoa(
     # Title — starred and colored purple if PERMANOVA significant (p ≤ 0.05)
     sig         = permanova_result and permanova_result.get("p_value", 1) <= 0.05
     plot_title  = title or metric_name
-    title_color = "#6A0DAD" if sig else "black"
+    title_color = "black"
     if show_title:
         ax.set_title(
             f"{plot_title} *" if sig else plot_title,
@@ -817,7 +817,7 @@ def plot_pcoa(
         if pf is not None and pv is not None:
             star         = " *" if pv <= 0.05 else ""
             annot        = f"PERMANOVA  F={pf:.3f}, p={pv:.3f}{star}"
-            annot_color  = "#6A0DAD" if pv <= 0.05 else "#444444"
+            annot_color  = "#444444"
             ax.annotate(
                 annot,
                 xy=(0.98, 0.02),
@@ -1002,6 +1002,7 @@ def plot_alpha(
     show_stats: bool = True,
     show_title: bool = True,
     group_order: Optional[List[str]] = None,
+    stats_qzv: Optional[Path] = None,
 ) -> plt.Figure:
     """
     Draw an alpha diversity strip + box plot with per-sample jittered points.
@@ -1107,23 +1108,66 @@ def plot_alpha(
             linewidths=0.4,
         )
 
-    # Statistical annotation
-    # Non-parametric tests used — see docstring for justification.
+    # Statistical annotation — read from QIIME2 KW QZV pairwise CSV if available,
+    # otherwise fall back to scipy for consistency with QZV provenance.
     if show_stats and len(group_data) >= 2:
-        if len(group_data) == 2:
-            # Mann-Whitney U: tests whether one distribution is stochastically
-            # greater than the other. Equivalent to Wilcoxon rank-sum test.
-            _stat, p_val = stats.mannwhitneyu(
-                group_data[0], group_data[1], alternative="two-sided"
-            )
+        qzv_stat_label = None
+        if stats_qzv is not None and Path(stats_qzv).exists():
+            try:
+                import zipfile as _zf, csv as _csv
+                with _zf.ZipFile(stats_qzv) as z:
+                    csvs = [n for n in z.namelist()
+                            if n.endswith('.csv') and 'pairwise' in n.lower()]
+                    if csvs:
+                        raw = z.read(csvs[0]).decode()
+                        rows = list(_csv.DictReader(io.StringIO(raw)))
+                        if len(group_data) == 2 and len(rows) == 1:
+                            row = rows[0]
+                            p_qzv = float(row.get('p-value', 1))
+                            q_qzv = float(row.get('q-value', 1))
+                            h_qzv = float(row.get('H', 0))
+                            g1 = row.get('Group 1','').split(' (')[0]
+                            g2 = row.get('Group 2','').split(' (')[0]
+                            qzv_stat_label = (
+                                f"Kruskal-Wallis  H={h_qzv:.3f}\n"
+                                f"p < 0.001, q < 0.001" if p_qzv < 0.001
+                                else f"Kruskal-Wallis  H={h_qzv:.3f}\n"
+                                f"p = {p_qzv:.3f}, q = {q_qzv:.3f}"
+                            )
+                        else:
+                            # Multi-group: show global KW from first row H
+                            # and note significant pairwise pairs
+                            sig_pairs = [(r.get('Group 1','').split(' (')[0],
+                                          r.get('Group 2','').split(' (')[0],
+                                          float(r.get('q-value',1)))
+                                         for r in rows
+                                         if float(r.get('q-value',1)) <= 0.05]
+                            h_vals = [float(r.get('H',0)) for r in rows if r.get('H')]
+                            h_mean = h_vals[0] if h_vals else 0
+                            p_min  = min(float(r.get('p-value',1)) for r in rows)
+                            if sig_pairs:
+                                pair_str = '; '.join(f"{a} vs {b} q={q:.3f}"
+                                                     for a,b,q in sig_pairs[:2])
+                                qzv_stat_label = (
+                                    f"Kruskal-Wallis  p={p_min:.3f}\n"
+                                    f"Sig. pairs: {pair_str}"
+                                )
+                            else:
+                                qzv_stat_label = f"Kruskal-Wallis\np = {p_min:.3f} ns"
+            except Exception as exc:
+                log.debug("Could not read alpha KW from QZV %s: %s", stats_qzv, exc)
+
+        if qzv_stat_label:
+            stat_label = qzv_stat_label
+            p_val = None  # already encoded in label
+        elif len(group_data) == 2:
+            # Fallback: scipy KW (matches QIIME2 KW more closely than MWU)
+            _stat, p_val = stats.kruskal(group_data[0], group_data[1])
             stat_label = (
-                f"Mann-Whitney U\np < 0.001" if p_val < 0.001
-                else f"Mann-Whitney U\np = {p_val:.3f}"
+                f"Kruskal-Wallis\np < 0.001" if p_val < 0.001
+                else f"Kruskal-Wallis\np = {p_val:.3f}"
             )
         else:
-            # Kruskal-Wallis: omnibus test across all groups.
-            # Significant result indicates at least one group differs;
-            # does not identify which pairs differ (no post-hoc here).
             _stat, p_val = stats.kruskal(*group_data)
             stat_label = (
                 f"Kruskal-Wallis\np < 0.001" if p_val < 0.001
@@ -1258,12 +1302,21 @@ def cmd_alpha(args: argparse.Namespace) -> None:
                 bbox=dict(boxstyle="square,pad=0.15", facecolor="white",
                           edgecolor="none", alpha=0.85),
             )
+            # Resolve QZV path for this metric if stats-qzv-dir provided
+            _qzv = None
+            if getattr(args, 'stats_qzv_dir', None):
+                _metric_stem = stem.replace("-", "_").replace(" ", "_")
+                _col = args.group_by.replace("-", "_")
+                _qzv_path = Path(args.stats_qzv_dir) / f"{_metric_stem}_group_sig_{_col}.qzv"
+                if _qzv_path.exists():
+                    _qzv = _qzv_path
             plot_alpha(
-                series, group_col, metric_name, args.group_by,
-                ax=ax, show_stats=not args.no_stats,
-                palette=palette,
-                show_title=not args.no_title,
-                group_order=group_order,
+            series, group_col, metric_name, args.group_by,
+            ax=ax, show_stats=not args.no_stats,
+            palette=palette,
+            show_title=not args.no_title,
+            group_order=group_order,
+            stats_qzv=_qzv,
             )
 
         for j in range(len(all_data), len(axes_flat)):
@@ -1479,6 +1532,13 @@ def build_parser() -> argparse.ArgumentParser:
     al.add_argument(
         "--no-stats", action="store_true",
         help="Disable statistical annotation (Mann-Whitney U / Kruskal-Wallis)",
+    )
+    al.add_argument(
+        "--stats-qzv-dir", default=None, metavar="DIR",
+        help="Directory containing KW QZV files named "
+             "{metric}_group_sig_{group_col}.qzv. "
+             "When provided, p-values are read from QZV pairwise CSV "
+             "(QIIME2 KW) instead of computed live.",
     )
     al.add_argument(
         "--output-dir", default="figures", metavar="DIR",
