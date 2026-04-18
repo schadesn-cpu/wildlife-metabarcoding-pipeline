@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-06_visualize_diversity.py
+09c_visualize_diversity.py
 =========================
 Generate publication-quality alpha and beta diversity figures directly
 from QIIME 2 QZA files. No QIIME 2 installation required at plot time —

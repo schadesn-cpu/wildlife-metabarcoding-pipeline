@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-parse_multiqc_demux.py
+04e_parse_multiqc_demux.py
 ======================
 Parse the Illumina demultiplex report directory and MultiQC FastQC data
 to produce a pre-DADA2 QC report without needing cutadapt logs or a
 QIIME2 environment.
 
-Designed for the loon project report structure:
+Designed for the pipeline report structure:
   reports/
   ├── primers_detected.tsv               ← from primer_advisor detect
   └── demultiplex/
@@ -824,7 +824,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Parse Illumina demultiplex reports and MultiQC FastQC data\n"
             "to produce a pre-DADA2 QC report. Requires the reports/ directory\n"
-            "structure from the loon project. No QIIME2 environment needed."
+            "structure from the pipeline. No QIIME2 environment needed."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

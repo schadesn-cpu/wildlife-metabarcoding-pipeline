@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-run_full_metabarcoding_pipeline.py
+05_run_full_metabarcoding_pipeline.py
 
 A reproducible, marker-aware QIIME2 wrapper for metabarcoding workflows.
 

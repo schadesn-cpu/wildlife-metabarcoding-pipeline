@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-parse_dada2_retention.py
+05b_parse_dada2_retention.py
 ========================
 Diagnostic utility for DADA2 read retention across all markers in a
 QIIME2 metabarcoding pipeline. Exports and parses denoising-stats.qza
@@ -63,7 +63,7 @@ where the most reads are lost. Common patterns and their causes:
 
 Adapting for other study systems
 ---------------------------------
-The default marker search paths follow the loon project directory
+The default marker search paths follow the pipeline directory
 structure. For a different project, either:
   1. Use --stats to point directly at .qza files, or
   2. Use --markers with --project-root to auto-search, or

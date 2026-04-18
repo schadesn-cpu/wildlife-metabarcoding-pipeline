@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-primer_advisor.py
+04d_primer_advisor.py
 =================
 Combined primer detection, DADA2 parameter suggestion, and post-cutadapt
 QC tool. Replaces detect_primers.py and suggest_dada2_params.py.

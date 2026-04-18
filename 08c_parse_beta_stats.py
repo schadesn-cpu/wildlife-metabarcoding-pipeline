@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-parse_beta_stats.py
+08c_parse_beta_stats.py
 ───────────────────
 Parse QIIME 2 beta-group-significance QZV files (PERMANOVA and PERMDISP)
 and write a clean summary TSV.

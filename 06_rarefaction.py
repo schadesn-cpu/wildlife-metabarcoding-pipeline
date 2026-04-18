@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-04_rarefaction.py
+06_rarefaction.py
 =================
 Standalone rarefaction curve generator for QIIME 2 feature tables.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-10c_plot_adeno_cutadapt.py
+14d_plot_adeno_cutadapt.py
 ==========================
 Generate aviadenovirus detection figures from cutadapt-confirmed primer reads.
 
@@ -110,7 +110,7 @@ NON_PRIMER_COLOR = "#CCCCCC"
 
 # Purple used for significant Fisher's exact results, consistent with
 # PERMANOVA annotation color used in 09_plot_diversity.py.
-SIG_COLOR = "#6A0DAD"
+SIG_COLOR = "#444444"
 NS_COLOR = "#444444"
 
 

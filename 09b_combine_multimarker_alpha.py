@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-06b_combine_multimarker_alpha.py
+09b_combine_multimarker_alpha.py
 =================================
 Combine four single-marker Observed Features alpha diversity plots into one
 publication-ready 4-panel figure (panels A–D, left to right).

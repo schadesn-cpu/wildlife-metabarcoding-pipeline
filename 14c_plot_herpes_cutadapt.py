@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-10b_plot_herpes_cutadapt.py
+14c_plot_herpes_cutadapt.py
 ===========================
 Generate herpesvirus detection figures from cutadapt-confirmed primer reads.
 
@@ -507,7 +507,7 @@ def plot_presence_absence(
         _, p_val = fisher_exact([[g1_pos, g1_neg], [g2_pos, g2_neg]])
 
         star = " *" if p_val <= 0.05 else " ns"
-        annot_color = "#6A0DAD" if p_val <= 0.05 else "#444444"
+        annot_color = "#444444"
 
         ax.annotate(
             f"Fisher's exact  p={p_val:.3f}{star}",

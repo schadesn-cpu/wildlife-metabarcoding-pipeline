@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-add_season_to_metadata.py
+04c_add_meteorological_season_to_metadata.py
 
 Adds a 'Season' column to a QIIME2 metadata TSV based on the 'Date Found' column.
 

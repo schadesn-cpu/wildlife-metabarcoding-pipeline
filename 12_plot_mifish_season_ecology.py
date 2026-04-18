@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-11_plot_mifish_season_ecology.py
+12_plot_mifish_season_ecology.py
 ================================
 Generate a multi-panel seasonal feeding ecology figure for MiFish 12S data
 that contextualizes dietary composition within loon migration ecology and

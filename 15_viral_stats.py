@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-14_viral_stats.py
+15_viral_stats.py
 =================
 Compute detection statistics for viral amplicon data produced by the
 loon metabarcoding pipeline. Designed to be run alongside 10_plot_viral.py
@@ -22,7 +22,7 @@ Usage examples
 --------------
   # Herpesvirus (no-hit signal, relative abundance threshold)
   python scripts/14_viral_stats.py \\
-      --xlsx loon_amplicon_analysis.xlsx \\
+      --xlsx your_analysis.xlsx \\
       --sheet herpes \\
       --metadata metadata/qiime/metadata_MiFish.tsv \\
       --threshold 0.01 \\
@@ -30,7 +30,7 @@ Usage examples
 
   # Adenovirus (taxon-filtered signal, absolute read count threshold)
   python scripts/14_viral_stats.py \\
-      --xlsx loon_amplicon_analysis.xlsx \\
+      --xlsx your_analysis.xlsx \\
       --sheet adeno \\
       --metadata metadata/qiime/metadata_MiFish.tsv \\
       --taxon-filter Aviadenovirus \\
@@ -290,7 +290,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     req = p.add_argument_group("required arguments")
     req.add_argument("--xlsx",     required=True, type=Path,
-                     help="Excel workbook (loon_amplicon_analysis.xlsx).")
+                     help="Excel workbook (your_analysis.xlsx).")
     req.add_argument("--sheet",    required=True,
                      help="Sheet name (e.g. herpes, adeno).")
     req.add_argument("--metadata", required=True, type=Path,

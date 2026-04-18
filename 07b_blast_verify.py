@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-08c_blast_verify.py
+07b_blast_verify.py
 ===================
 BLAST-verify ambiguous or suspect taxa from a QIIME2 metabarcoding taxonomy
 table against a local or remote NCBI nt database.
@@ -38,7 +38,7 @@ Usage examples
       --counts     results/MiFish/all/taxonomy/taxonomy_counts_L7_MiFish.tsv \\
       --marker     MiFish \\
       --min-reads  10000 \\
-      --db         /home/share/databases/ncbi_nt/nt \\
+      --db         /path/to/nt \\
       --outdir     results/MiFish/all/blast_verify/
 
   # BLAST specific suspect taxa by name substring
@@ -48,7 +48,7 @@ Usage examples
       --counts     results/MiFish/all/taxonomy/taxonomy_counts_L7_MiFish.tsv \\
       --marker     MiFish \\
       --taxa       Brevoortia Lutjanidae Sprattus Trachinotus Esox \\
-      --db         /home/share/databases/ncbi_nt/nt \\
+      --db         /path/to/nt \\
       --outdir     results/MiFish/all/blast_verify/
 
   # Use remote NCBI if no local database available (slower)
@@ -533,9 +533,9 @@ def build_parser() -> argparse.ArgumentParser:
                      help="BLAST all taxa with total reads >= this threshold")
 
     db_grp = p.add_argument_group("BLAST database (use one)")
-    db_grp.add_argument("--db", default="/home/share/databases/ncbi_nt/nt",
+    db_grp.add_argument("--db", default=None,
                          help="Path to local BLAST nt database (without extension). "
-                              "Default: /home/share/databases/ncbi_nt/nt")
+                              "Path to local BLAST nt database (required unless --remote is set). Example: /path/to/nt")
     db_grp.add_argument("--remote", action="store_true", default=False,
                          help="Use remote NCBI BLAST instead of local database "
                               "(slower; use if local db unavailable)")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-10_plot_viral.py
+14_plot_viral.py
 ================
 Generate publication-quality viral detection figures from amplicon sequencing
 data classified against NCBI nt via BLAST. Designed for the TGF-IYG

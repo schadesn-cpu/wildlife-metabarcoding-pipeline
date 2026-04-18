@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-make_qiime_metadata.py
+04_make_qiime_metadata.py
 
 Create a QIIME2-ready sample metadata TSV whose `sample-id` matches the sample IDs
 present in a QIIME2 feature table (table.qza) or exported BIOM (feature-table.biom).

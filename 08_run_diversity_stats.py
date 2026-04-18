@@ -27,7 +27,7 @@ All outputs are written to:
 Usage examples:
 
   # MiFish (no tree, non-phylogenetic):
-  python scripts/04_run_diversity_stats.py \\
+  python scripts/08_run_diversity_stats.py \\
       --marker MiFish \\
       --dataset all \\
       --metadata metadata/qiime/metadata_MiFish.tsv \\
@@ -35,7 +35,7 @@ Usage examples:
       --group-column Group
 
   # 16S (phylogenetic, different depth):
-  python scripts/04_run_diversity_stats.py \\
+  python scripts/08_run_diversity_stats.py \\
       --marker 16S \\
       --dataset all \\
       --metadata metadata/qiime/metadata_16S.tsv \\
@@ -44,7 +44,7 @@ Usage examples:
       --phylo
 
   # Dry run to preview commands without executing:
-  python scripts/04_run_diversity_stats.py \\
+  python scripts/08_run_diversity_stats.py \\
       --marker MiFish --dataset all \\
       --metadata metadata/qiime/metadata_MiFish.tsv \\
       --metrics-dir qiime2/MiFish/all/diversity/core-metrics-17000 \\

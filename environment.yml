@@ -35,12 +35,12 @@ dependencies:
   - pandas>=2.0
   - scipy>=1.11
   - matplotlib>=3.8
-  - biopython>=1.81      # phylogenetic tree plotting (10b_plot_adeno_tree.py)
+  - biopython>=1.81      # phylogenetic tree plotting (14b_plot_adeno_tree.py)
   - pyyaml>=6.0          # config file parsing (config_loader.py)
 
   # ── Bioinformatics utilities ───────────────────────────────
   - biom-format>=2.1     # reading BIOM feature tables
-  - cutadapt>=4.6        # primer trimming (called by 03_run_full_metabarcoding_pipeline.py)
+  - cutadapt>=4.6        # primer trimming (called by 05_run_full_metabarcoding_pipeline.py)
 
   # ── Optional: NCBI reference building ─────────────────────
   # Uncomment if building viral or cytb reference databases

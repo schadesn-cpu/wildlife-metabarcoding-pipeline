@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-01_make_manifests.py
+03_make_manifests.py
 ====================
 Auto-build QIIME 2 PairedEndFastqManifestPhred33V2 manifest TSVs from a
 reads directory organized into per-marker subdirectories.

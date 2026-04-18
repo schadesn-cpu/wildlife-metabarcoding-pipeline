@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-00_build_classifiers.py
+01_build_classifiers.py
 =======================
 QIIME 2 classifier training and reference database builder for metabarcoding
 and viral detection workflows.

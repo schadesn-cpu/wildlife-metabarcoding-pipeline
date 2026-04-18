@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-12_plot_habitat_season.py
+13_plot_habitat_season.py
 =========================
 Generate a publication-quality stacked barplot showing fish prey habitat
 composition (marine / freshwater / anadromous / estuarine) grouped by
@@ -133,9 +133,9 @@ SEASON_LABELS  = {
 
 # Group display colors for the group indicator bar at the bottom
 GROUP_COLORS = {
-    "Diseased":  "#C00000",
-    "Trauma":    "#1F4E79",
-    "Marine":    "#009E73",
+    "Diseased":  "#0072B2",   # Wong blue  — consistent with all other figures
+    "Trauma":    "#E69F00",   # Wong orange — consistent with all other figures
+    "Marine":    "#009E73",   # Wong green  — already correct
 }
 
 

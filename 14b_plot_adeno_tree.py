@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-10b_plot_adeno_tree.py
+14b_plot_adeno_tree.py
 ======================
 Publication-quality phylogenetic tree for loon adenovirus OTUs.
 Expanded reference set covering diverse Aviadenovirus species.

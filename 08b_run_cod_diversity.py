@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-05b_run_cod_diversity.py
+08b_run_cod_diversity.py
 
 Run diversity group-significance tests stratified by cause-of-death (COD)
 category and collection source. Designed to run after 08_run_diversity_stats.py
@@ -21,7 +21,7 @@ COD_broad categories:
   Unknown_Other         n=3  (open COD or neoplasia — included in metadata,
                                not the primary comparison group)
 
-Usage (from loon_project root):
+Usage (from project root):
   conda activate qiime2-amplicon-2024.5
 
   python scripts/05b_run_cod_diversity.py \\

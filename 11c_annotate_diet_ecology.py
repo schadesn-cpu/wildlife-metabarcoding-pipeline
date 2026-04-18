@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-10b_annotate_diet_ecology.py
+11c_annotate_diet_ecology.py
 ============================
 Add ecological and lay-friendly annotations to a cleaned dietary
 metabarcoding taxonomy table produced by 11_clean_diet_table.py.

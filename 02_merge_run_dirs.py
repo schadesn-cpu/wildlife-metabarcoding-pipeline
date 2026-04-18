@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-00_merge_run_dirs.py
+02_merge_run_dirs.py
 ====================
 Merge multiple sequencing run directories (each containing flat FASTQ files)
 into a single reads/ directory tree ready for 01_make_manifests.py.
