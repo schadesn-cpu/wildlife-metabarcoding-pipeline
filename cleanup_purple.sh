@@ -2,7 +2,7 @@
 # ============================================================
 #  cleanup_purple.sh
 #  Removes all _purple figure files from loon_project.
-#  Run from: /home/users/sne24/meedlab/loon_project
+#  Run from: your project root directory
 #
 #  BEFORE RUNNING:
 #    1. Regenerate adenovirus and herpesvirus wong figures
@@ -16,7 +16,7 @@
 
 set -euo pipefail
 DRY_RUN="${DRY_RUN:-1}"
-ROOT="/home/users/sne24/meedlab/loon_project"
+ROOT="${ROOT:-$(pwd)}"
 
 echo "=============================================="
 echo "  PURPLE FILE CLEANUP"

@@ -5,15 +5,15 @@
 #  paper-ready names. Copies (not moves) from results/.
 #  Run AFTER cleanup_purple.sh.
 #
-#  Run from: /home/users/sne24/meedlab/loon_project
-#  Output:   /home/users/sne24/meedlab/loon_project/manuscript_figures/
+#  Run from: your project root directory
+#  Output:   <project_root>/manuscript_figures/
 #
 #  Usage:
 #    bash build_manuscript_figures.sh
 # ============================================================
 
 set -euo pipefail
-ROOT="/home/users/sne24/meedlab/loon_project"
+ROOT="${ROOT:-$(pwd)}"
 OUT="${ROOT}/manuscript_figures"
 
 mkdir -p "$OUT"
@@ -67,10 +67,10 @@ cp_fig \
 
 # Fig 4 — cytb DvT PCoA
 cp_fig \
-    "results/cytb/DvT/figures/cytb_r200_DvT_pcoa_wong.png" \
+    "results/cytb/DvT/figures/cytb_r1000_DvT_pcoa_wong.png" \
     "Fig04_cytb_DvT_pcoa.png"
 cp_fig \
-    "results/cytb/DvT/figures/cytb_r200_DvT_pcoa_wong.svg" \
+    "results/cytb/DvT/figures/cytb_r1000_DvT_pcoa_wong.svg" \
     "Fig04_cytb_DvT_pcoa.svg"
 
 # Fig 5 — 18S DvT PCoA  ⚠ PENDING 18S decision
@@ -139,10 +139,10 @@ cp_fig \
 
 # Fig 13 — Adenovirus phylogenetic tree (check path — not in audit)
 cp_fig \
-    "results/adenovirus/figures/adeno_phylotree_wong.png" \
+    "results/adenovirus/figures/adeno_phylo_tree.png" \
     "Fig13_adeno_phylotree.png"
 cp_fig \
-    "results/adenovirus/figures/adeno_phylotree_wong.svg" \
+    "results/adenovirus/figures/adeno_phylo_tree.svg" \
     "Fig13_adeno_phylotree.svg"
 
 echo ""

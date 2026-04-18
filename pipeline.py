@@ -83,8 +83,8 @@ log = logging.getLogger(__name__)
 #   loon_project/pipeline_config.yml
 #   loon_project/scripts/       ← SCRIPTS_DIR (numbered scripts + config_loader.py)
 #   loon_project/scripts/config_loader.py
-#   loon_project/scripts/00_build_classifiers.py
-#   loon_project/scripts/01_make_manifests.py
+#   loon_project/scripts/01_build_classifiers.py
+#   loon_project/scripts/03_make_manifests.py
 #   ...
 # ---------------------------------------------------------------------------
 
@@ -199,7 +199,7 @@ def step_import(cfg, dry_run: bool) -> None:
     """
     Build QIIME2 manifests and import demultiplexed FASTQs.
 
-    Calls 01_make_manifests.py to build PairedEndFastqManifestPhred33V2
+    Calls 03_make_manifests.py to build PairedEndFastqManifestPhred33V2
     TSVs from the reads/ directory, then calls 03_run_full_metabarcoding_pipeline.py
     import for each active marker.
     """
@@ -237,7 +237,7 @@ def step_denoise(cfg, dry_run: bool) -> None:
     """
     Cutadapt primer trimming + DADA2 denoising for all active markers.
 
-    Calls 03_run_full_metabarcoding_pipeline.py cutadapt and dada2 for
+    Calls 05_run_full_metabarcoding_pipeline.py cutadapt and dada2 for
     each marker. Truncation parameters must be set per-marker in the
     pipeline call or configured in the relevant sub-script.
 
@@ -268,7 +268,7 @@ def step_taxonomy(cfg, dry_run: bool) -> None:
     """
     Taxonomic classification and table export for all active markers.
 
-    Calls 03_run_full_metabarcoding_pipeline.py taxonomy for classification,
+    Calls 05_run_full_metabarcoding_pipeline.py taxonomy for classification,
     then 07_taxonomy_table.py to export human-readable count TSVs.
     """
     for marker in cfg.active_markers:
