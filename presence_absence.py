@@ -1,162 +1,43 @@
 #!/usr/bin/env python3
 """
-11b_presence_absence.py
-=======================
-Convert a taxonomy count table to presence/absence, compute detection
-frequencies, and generate detection barplots. Designed as a universal
-presence/absence framework for any amplicon metabarcoding marker where
-relative read abundance is not a reliable proxy for biological quantity.
+presence_absence.py
+===================
+Step: presence/absence (optional `analyses.presence_absence` stage; after taxonomy)
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PHILOSOPHY
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Purpose:
+    Convert a taxonomy count table to presence/absence, compute detection
+    frequencies, and generate detection barplots. A universal framework for any
+    marker where relative read abundance is not a defensible proxy for biological
+    quantity — dietary metabarcoding (MiFish, cytb, COI), blood meals, and any
+    low-depth marker. Each sample is an independent detection unit:
+    "was taxon X detected in sample Y?" and "how often across samples?"
 
-Amplicon metabarcoding count data is not a standard community diversity
-dataset in many study designs. Each sample is treated as an independent
-detection unit. The key questions are:
+    Why presence/absence: PCR efficiency, mitochondrial copy number, and
+    degradation vary across taxa independently of biological quantity, so read
+    proportions can't be read as abundance. Deagle et al. (2019, Mol. Ecol.) is
+    the standard reference; see also Borland & Kading (2021) and Balasubramanian
+    et al. (2024) for blood-meal work.
 
-  - Was taxon X detected in sample Y?          (presence/absence)
-  - Across all samples, how frequently was X detected?  (detection freq)
+Inputs:
+    --counts    taxonomy count TSV (from taxonomy_table.py; derived from --marker)
+    --metadata  QIIME 2 metadata TSV (optional; needed for --group-by)
+    pipeline_config.yml  analyses.presence_absence (thresholds, group column, label)
 
-This framework is appropriate whenever relative read abundance cannot be
-defended as a proxy for biological quantity. Common cases include:
+Outputs (in --outdir, default results/<marker>/all/presence_absence/):
+    presence_absence_<marker>.tsv         binary detection matrix
+    detection_freq_<marker>.tsv           overall detection frequency per taxon
+    detection_freq_by_group_<marker>.tsv  detection frequency per group
+    detection_barplot_<marker>_*.png/svg  detection barplots
+    detection_summary_<marker>.txt        text summary
+    logs/run_manifest.jsonl               run appended on completion
 
-  - Dietary metabarcoding (MiFish, cytb, COI): PCR efficiency differs
-    across prey taxa, mitochondrial copy number varies by tissue and
-    species, and digestion state affects DNA yield independently of
-    consumption amount. Deagle et al. (2019, Mol. Ecol.) is the
-    standard reference for why presence/absence is the preferred unit.
+Usage:
+    python presence_absence.py --marker MiFish
+    python presence_absence.py --marker cytb --sample-label loon
+    python presence_absence.py --counts counts.tsv --marker COI --outdir out/
 
-  - Blood meal metabarcoding (COI, 12S, 16S): blood meal DNA is
-    degraded and variably amplified; a single sample may contain DNA
-    from multiple feeding events at different times. Framework
-    recommended by Borland & Kading (2021, DOI: 10.3390/insects12010037)
-    and Balasubramanian et al. (2024, DOI: 10.1002/edn3.522).
-
-  - Any marker with low rarefaction depth: at <=200 reads per sample,
-    relative abundance estimates have variance too large to be
-    meaningfully interpreted. Presence/absence is the only statistically
-    honest choice.
-
-The approach: apply read-count quality filters, convert to binary 0/1,
-then summarize as detection frequency per group.
-
-Use --sample-label to replace the generic "sample" with a study-specific
-term in all output text (e.g. "loon", "tick", "individual").
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PIPELINE POSITION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  07_taxonomy_table.py  ->  taxonomy_counts_L{N}_{marker}.tsv
-                                        |
-                        11b_presence_absence.py  <- metadata TSV (optional)
-                                        |
-              presence_absence_L{N}_{marker}.tsv   <- input to 08_run_diversity_stats.py
-              detection_freq_{marker}.tsv
-              detection_freq_by_{group}_{marker}.tsv
-              detection_summary_{marker}.txt
-              detection_barplot_{marker}_{group}.png/.svg
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FILTERING LOGIC
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Applied in order before presence/absence conversion:
-
-  1. --min-sample-reads   Drop samples with fewer total reads than this.
-                          Avoids calling detections in near-empty samples.
-                          Default: 500. Set lower for low-depth markers
-                          (e.g. --min-sample-reads 50 for cytb at depth 200).
-
-  2. --min-taxon-reads    Drop taxa with fewer reads across the whole
-                          dataset than this. Removes globally rare taxa
-                          that are likely amplification artifacts.
-                          Default: 50
-
-  3. --min-relabund       Within each sample, zero out any taxon whose
-                          relative read abundance is below this threshold
-                          before converting to 0/1. Optional; useful for
-                          removing low-level cross-contamination.
-                          Default: 0.0 (disabled)
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OUTPUTS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  presence_absence_L{N}_{marker}.tsv
-      Binary 0/1 table: taxa (rows) x samples (columns).
-      Direct input to 08_run_diversity_stats.py for Jaccard + PERMANOVA.
-
-  detection_freq_{marker}.tsv
-      Per-taxon detection frequency across all retained samples.
-      Columns: taxon, n_detected, n_samples, detection_freq, pct_detected
-
-  detection_freq_by_{group}_{marker}.tsv
-      Same as above but computed per group (requires --metadata --group-by).
-      Wide format: taxon x group, values = detection frequency (0-1).
-
-  detection_summary_{marker}.txt
-      Human-readable summary: how many samples had at least one detection,
-      per-taxon detection frequencies, and per-group breakdowns.
-
-  detection_barplot_{marker}.png / .svg
-      Horizontal bar chart of detection frequency (%) per taxon.
-      Sorted by overall detection frequency descending.
-      If --group-by is set, grouped bars are drawn per group.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-USAGE EXAMPLES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  # MiFish diet — group comparison, standard thresholds
-  python 11b_presence_absence.py \\
-      --counts            results/MiFish/all/taxonomy/taxonomy_counts_L7_MiFish.tsv \\
-      --metadata          metadata/qiime/metadata_MiFish.tsv \\
-      --marker            MiFish \\
-      --group-by          Group \\
-      --min-sample-reads  10000 \\
-      --min-taxon-reads   10 \\
-      --min-relabund      0.01 \\
-      --sample-label      loon \\
-      --outdir            results/MiFish/all/presence_absence/
-
-  # cytb — low depth marker, thresholds adjusted to match reality
-  # At rarefaction depth 200, --min-sample-reads must be <= 200.
-  # --min-relabund 0.01 requires >= 2 reads for a detection call at depth 200,
-  # which is the practical minimum for distinguishing signal from noise.
-  python 11b_presence_absence.py \\
-      --counts            results/cytb/all/taxonomy/taxonomy_counts_L7_cytb.tsv \\
-      --metadata          metadata/qiime/metadata_cytb.tsv \\
-      --marker            cytb \\
-      --group-by          Group \\
-      --min-sample-reads  50 \\
-      --min-taxon-reads   5 \\
-      --min-relabund      0.01 \\
-      --sample-label      loon \\
-      --outdir            results/cytb/all/presence_absence/
-
-  # Blood meal tick study — original use case still fully supported
-  python 11b_presence_absence.py \\
-      --counts            results/COI/all/taxonomy/taxonomy_counts_L7_COI.tsv \\
-      --metadata          metadata/qiime/metadata_COI.tsv \\
-      --marker            COI \\
-      --group-by          Site \\
-      --min-sample-reads  1000 \\
-      --min-taxon-reads   100 \\
-      --min-relabund      0.01 \\
-      --sample-label      tick \\
-      --outdir            results/COI/all/presence_absence/
-
-  # Dry run -- see what would happen without writing files
-  python 11b_presence_absence.py \\
-      --counts   results/cytb/all/taxonomy/taxonomy_counts_L7_cytb.tsv \\
-      --marker   cytb \\
-      --outdir   results/cytb/all/presence_absence/ \\
-      --dry-run
-
-Dependencies:
-  pip install matplotlib numpy pandas
+Requirements:
+    Python >= 3.8, pandas, numpy, matplotlib. No QIIME 2 needed (reads TSV).
 """
 from __future__ import annotations
 
@@ -173,6 +54,14 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+# --- make config_loader and the utils package importable regardless of cwd ---
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from config_loader import load_config, get_paths, get_metadata_path  # noqa: E402
+from utils import checkpoint, provenance                             # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -908,16 +797,15 @@ def run_presence_absence(
 
     log.info("")
     log.info(
-        "Next step — run Jaccard + PERMANOVA with 08_run_diversity_stats.py:\n"
-        "  python 08_run_diversity_stats.py \\\n"
+        "Next step — run Jaccard + PERMANOVA with group_diversity.py:\n"
+        "  python group_diversity.py \\\n"
         "    --marker       %s \\\n"
         "    --dataset      all \\\n"
         "    --metadata     metadata/qiime/metadata_%s.tsv \\\n"
-        "    --metrics-dir  <your core-metrics directory> \\\n"
-        "    --group-column <your grouping column>\n\n"
-        "  Note: 08_run_diversity_stats.py operates on QIIME2 core-metrics output.\n"
-        "  The presence_absence TSV written here can be imported into R (vegan)\n"
-        "  for Jaccard + PERMANOVA if preferred:\n\n"
+        "    --metrics-dir  <your core-metrics directory>\n\n"
+        "  Note: group_diversity.py operates on QIIME2 core-metrics output and\n"
+        "  reads the grouping column(s) from the config. The presence_absence TSV\n"
+        "  written here can also be imported into R (vegan) for Jaccard + PERMANOVA:\n\n"
         "    library(vegan)\n"
         "    pa <- read.table('%s', sep='\\t', header=TRUE, row.names=1)\n"
         "    jac <- vegdist(t(pa), method='jaccard', binary=TRUE)\n"
@@ -942,91 +830,76 @@ def build_parser() -> argparse.ArgumentParser:
     recommended approach for blood meal data.
     """
     p = argparse.ArgumentParser(
-        prog="11b_presence_absence.py",
+        prog="presence_absence.py",
         description=(
             "Convert taxonomy count table to presence/absence and compute "
             "detection frequencies for amplicon metabarcoding data.\n"
-            "Designed to run after 07_taxonomy_table.py.\n"
-            "See module docstring for full rationale and usage examples."
+            "Runs after taxonomy_table.py. See module docstring for rationale."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    # Required
+    # Inputs (derived from --marker + config when omitted)
     p.add_argument(
-        "--counts", required=True, type=Path,
+        "--marker", required=True,
+        help="Marker name (e.g. cytb, MiFish). Drives derived paths and config.",
+    )
+    p.add_argument(
+        "--config", default=None,
+        help="Path to pipeline_config.yml.",
+    )
+    p.add_argument(
+        "--counts", default=None, type=Path,
         help=(
-            "Taxonomy count TSV from 07_taxonomy_table.py "
-            "(e.g. taxonomy_counts_L7_cytb.tsv). "
-            "Taxa as rows, samples as columns."
+            "Taxonomy count TSV from taxonomy_table.py (e.g. taxonomy_counts_L7_cytb.tsv). "
+            "Derived from --marker (deepest available level) if omitted."
         ),
     )
     p.add_argument(
-        "--marker", required=True,
-        help="Marker name used for output file naming (e.g. cytb, COI).",
-    )
-    p.add_argument(
-        "--outdir", required=True, type=Path,
-        help="Directory to write all outputs.",
+        "--outdir", default=None, type=Path,
+        help="Output directory. Default: results/<marker>/all/presence_absence/",
     )
 
     # Metadata / grouping (optional but must be used together)
     p.add_argument(
         "--metadata", default=None, type=Path,
-        help=(
-            "QIIME2-format metadata TSV. "
-            "Required if --group-by is set."
-        ),
+        help="QIIME2-format metadata TSV. Derived from --marker if omitted; required for --group-by.",
     )
     p.add_argument(
         "--group-by", default=None,
         help=(
-            "Metadata column to use for group-level detection summaries "
-            "and grouped barplots (e.g. Site, TickSpecies)."
+            "Metadata column for group-level detection summaries and grouped barplots. "
+            "Defaults to the config's primary group column."
         ),
     )
 
-    # Filter thresholds
+    # Filter thresholds (None → analyses.presence_absence config → built-in default)
     p.add_argument(
-        "--min-sample-reads", type=int, default=500,
-        metavar="N",
-        help=(
-            "Drop samples with fewer than N total reads before conversion. "
-            "Default: 500"
-        ),
+        "--min-sample-reads", type=int, default=None, metavar="N",
+        help="Drop samples with fewer than N total reads before conversion. Default: 500",
     )
     p.add_argument(
-        "--min-taxon-reads", type=int, default=50,
-        metavar="N",
-        help=(
-            "Drop taxa with fewer than N reads across the whole dataset. "
-            "Default: 50"
-        ),
+        "--min-taxon-reads", type=int, default=None, metavar="N",
+        help="Drop taxa with fewer than N reads across the whole dataset. Default: 50",
     )
     p.add_argument(
-        "--min-relabund", type=float, default=0.0,
-        metavar="F",
+        "--min-relabund", type=float, default=None, metavar="F",
         help=(
-            "Within each sample, zero out taxa whose relative read abundance "
-            "is below F before converting to 0/1. "
-            "Value is a fraction (e.g. 0.01 = 1%%). "
-            "Default: 0.0 (disabled)"
+            "Within each sample, zero out taxa whose relative read abundance is below F "
+            "before converting to 0/1 (e.g. 0.01 = 1%%). Default: 0.0 (disabled)"
         ),
     )
 
     # Plot options
     p.add_argument(
-        "--top-n", type=int, default=20,
-        metavar="N",
+        "--top-n", type=int, default=None, metavar="N",
         help="Maximum number of taxa to show in barplots. Default: 20",
     )
     p.add_argument(
-        "--sample-label", default="sample",
-        metavar="WORD",
+        "--sample-label", default=None, metavar="WORD",
         help=(
-            "Unit word used in summary text and figure subtitles. "
-            "Set to match your study design, e.g. 'loon', 'tick', 'individual'. "
-            "Default: sample"
+            "Unit word used in summary text and figure subtitles "
+            "(e.g. 'loon', 'tick', 'individual'). Default: sample"
         ),
     )
 
@@ -1043,52 +916,82 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main() -> int:
+def main(argv=None) -> int:
     """
     Parse arguments and run the presence/absence pipeline.
 
-    Validates that --counts exists, that --metadata is provided when
-    --group-by is set, and that min_relabund is in [0, 1]. Returns 0
+    Resolves counts/outdir/metadata/thresholds from --marker + config when not
+    given, validates inputs, runs the analysis, and records the run. Returns 0
     on success, 2 for missing/invalid inputs, 1 for any other error.
     """
     parser = build_parser()
-    args   = parser.parse_args()
+    args   = parser.parse_args(argv)
 
-    # ── Input validation ──────────────────────────────────────────────────
-    if not args.counts.exists():
-        log.error("Count TSV not found: %s", args.counts)
+    cfg = load_config(args.config)
+    paths = get_paths(cfg)
+    pcfg = cfg.analyses.get("presence_absence", {})
+    marker = args.marker
+
+    # ── Resolve inputs/outputs/params from the marker + config ────────────────
+    counts = args.counts or _derive_counts_tsv(paths, marker)
+    if counts is None:
+        log.error("No taxonomy count TSV found for %s — run the taxonomy stage "
+                  "first, or pass --counts explicitly.", marker)
+        return 2
+    outdir = args.outdir or paths.engine_presence_absence_results_dir(marker, "all")
+
+    user_group = args.group_by is not None
+    group_by = args.group_by if user_group else cfg.groups.get("primary", {}).get("column")
+    metadata = args.metadata
+    if group_by and metadata is None:
+        try:
+            cand = get_metadata_path(cfg, marker, "all")
+        except (KeyError, ValueError):
+            cand = None
+        metadata = cand if (cand and Path(cand).exists()) else None
+
+    min_sample_reads = args.min_sample_reads if args.min_sample_reads is not None \
+        else pcfg.get("min_sample_reads", 500)
+    min_taxon_reads  = args.min_taxon_reads if args.min_taxon_reads is not None \
+        else pcfg.get("min_taxon_reads", 50)
+    min_relabund     = args.min_relabund if args.min_relabund is not None \
+        else pcfg.get("min_relabund", 0.0)
+    top_n            = args.top_n if args.top_n is not None else pcfg.get("top_n", 20)
+    sample_label     = args.sample_label or pcfg.get("sample_label", "sample")
+
+    # ── Input validation ──────────────────────────────────────────────────────
+    if not Path(counts).exists():
+        log.error("Count TSV not found: %s", counts)
+        return 2
+    if group_by and metadata is None:
+        if user_group:
+            log.error("--group-by '%s' needs metadata, but none was found.", group_by)
+            return 2
+        log.warning("group column '%s' (from config) has no metadata — "
+                    "skipping group-level summaries.", group_by)
+        group_by = None
+    if metadata is not None and not Path(metadata).exists():
+        log.error("Metadata file not found: %s", metadata)
+        return 2
+    if not 0.0 <= min_relabund < 1.0:
+        log.error("min_relabund must be between 0.0 and 1.0 (got %s)", min_relabund)
         return 2
 
-    if args.group_by is not None and args.metadata is None:
-        log.error("--group-by requires --metadata to also be set.")
-        return 2
-
-    if args.metadata is not None and not args.metadata.exists():
-        log.error("Metadata file not found: %s", args.metadata)
-        return 2
-
-    if not 0.0 <= args.min_relabund < 1.0:
-        log.error(
-            "--min-relabund must be between 0.0 and 1.0 (got %s)",
-            args.min_relabund,
-        )
-        return 2
-
-    # ── Run ───────────────────────────────────────────────────────────────
+    # ── Run ────────────────────────────────────────────────────────────────────
     try:
         run_presence_absence(
-            counts_tsv       = args.counts,
-            marker           = args.marker,
-            outdir           = args.outdir,
-            metadata_path    = args.metadata,
-            group_by         = args.group_by,
-            min_sample_reads = args.min_sample_reads,
-            min_taxon_reads  = args.min_taxon_reads,
-            min_relabund     = args.min_relabund,
-            top_n            = args.top_n,
+            counts_tsv       = Path(counts),
+            marker           = marker,
+            outdir           = Path(outdir),
+            metadata_path    = Path(metadata) if metadata else None,
+            group_by         = group_by,
+            min_sample_reads = min_sample_reads,
+            min_taxon_reads  = min_taxon_reads,
+            min_relabund     = min_relabund,
+            top_n            = top_n,
             force            = args.force,
             dry_run          = args.dry_run,
-            sample_label     = args.sample_label,
+            sample_label     = sample_label,
         )
     except ValueError as e:
         log.error("%s", e)
@@ -1097,7 +1000,38 @@ def main() -> int:
         eprint(f"\n[ERROR] {e}")
         return 1
 
+    if not args.dry_run:
+        produced = sorted(str(p) for p in Path(outdir).glob(f"*{marker}*"))
+        checkpoint.print_checkpoint(
+            cfg, "presence_absence",
+            marker=marker,
+            produced=produced,
+            provenance={
+                "inputs": {"counts": counts, "metadata": metadata},
+                "outputs": produced,
+                "command": "python " + " ".join([Path(sys.argv[0]).name, *sys.argv[1:]]),
+                "extra": {"min_sample_reads": min_sample_reads,
+                          "min_taxon_reads": min_taxon_reads,
+                          "min_relabund": min_relabund, "group_by": group_by},
+            },
+        )
     return 0
+
+
+def _derive_counts_tsv(paths, marker: str) -> Optional[Path]:
+    """
+    Find the taxonomy count TSV for a marker, picking the deepest taxonomic
+    level available (e.g. L7 over L6). Returns None if none exist yet.
+    """
+    tax_dir = paths.engine_taxonomy_results_dir(marker, "all")
+    hits = sorted(tax_dir.glob(f"taxonomy_counts_L*_{marker}.tsv"))
+    if not hits:
+        return None
+    # Deepest level = highest L number in the filename.
+    def _level(p: Path) -> int:
+        m = re.search(r"_L(\d+)_", p.name)
+        return int(m.group(1)) if m else 0
+    return max(hits, key=_level)
 
 
 if __name__ == "__main__":

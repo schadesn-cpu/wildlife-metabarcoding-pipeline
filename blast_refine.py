@@ -1,111 +1,41 @@
 #!/usr/bin/env python3
 """
-07d_blast_refine_unresolved.py
-===============================
-BLAST-based refinement of ASVs that classifiers could not resolve to a
-target taxonomic rank (typically genus).
+blast_refine.py
+===============
+Step: blast (optional `analyses.blast` stage; after taxonomy, before export)
 
-Complementary to 07c_blast_qc_unclassified.py:
-  - 07c_ flags ASVs where classifier output CONFLICTS with expected taxa
-    (e.g. host DNA miscalled as fish in MiFish/cytb).
-  - 07d_ refines ASVs where the classifier STOPPED TOO HIGH (e.g.
-    "f__Enterobacteriaceae" with no genus) and BLAST against NCBI nt can
-    push them down using more comprehensive references.
+Purpose:
+    BLAST-refine ASVs the classifier left UNDER-resolved — assignments that stop
+    too high (e.g. "f__Enterobacteriaceae" with no genus) — by BLASTing their
+    sequences against a local NCBI nt (or custom) database and pushing them down
+    a rank when the hits agree. Complements the QC-conflict check (07c) and the
+    targeted verification (07b): this one fills in detail rather than flagging
+    errors. Produces a per-ASV summary, a human-review report, and — only with
+    --apply — a patched refined_taxonomy_<marker>.tsv.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PIPELINE POSITION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Review the report before trusting --apply output: BLAST hits to nt can be
+    mislabelled, so the refined taxonomy is a proposal, not ground truth.
 
-  dada2/rep-seqs.qza ──┐
-  taxonomy/taxonomy.qza ┼──► 07d_blast_refine_unresolved.py
-                        │         ↓
-                  blast_summary_{marker}.tsv         ← per-ASV genus calls
-                  refined_taxonomy_{marker}.tsv      ← patched taxonomy (w/ --apply)
-                  blast_refine_report_{marker}.txt   ← human review
-                        ↓
-                  07_taxonomy_table.py (re-run with refined TSV)
-                        ↓
-                  10_plot_taxonomy.py
+Inputs:
+    --taxonomy  exported taxonomy TSV (Feature ID, Taxon, Confidence; from --marker)
+    --rep-seqs  exported rep-seqs FASTA (dna-sequences.fasta; from --marker)
+    --blast-db  path to a local BLAST nt/custom DB (from analyses.blast.db)
+    pipeline_config.yml  analyses.blast (db, thresholds, target_rank, apply)
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-WHY THIS EXISTS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Outputs (in --outdir, default results/<marker>/all/blast/):
+    blast_summary_<marker>.tsv          per-ASV refined-rank calls
+    blast_refine_report_<marker>.txt    human-review report
+    refined_taxonomy_<marker>.tsv       patched taxonomy (only with --apply)
+    logs/run_manifest.jsonl             run appended on completion
 
-SILVA and similar classifiers stop at family or order level for common
-gut/environmental bacteria when V4 16S resolution hits species limits.
-Examples:
+Usage:
+    python blast_refine.py --marker cytb                 # uses analyses.blast.db
+    python blast_refine.py --marker cytb --apply          # write refined TSV
+    python blast_refine.py --marker cytb --existing-blast prior_hits.tsv
 
-  - "f__Enterobacteriaceae" with no genus: V4 cannot fully separate
-    E. coli / Shigella / Salmonella / Klebsiella, but CAN usually pick
-    Escherichia vs Citrobacter vs Klebsiella as the dominant call.
-  - "o__Lactobacillales" with no family: V4 typically resolves
-    Carnobacterium, Vagococcus, Enterococcus against NCBI nt.
-
-BLAST against nt uses a far larger reference set than SILVA's
-representatives. For well-represented genera this yields clean genus
-calls. For poorly-represented taxa (common in wildlife gut microbiomes),
-BLAST hits are dominated by "uncultured bacterium" deposits and no
-refinement is possible — these are correctly flagged as unresolved
-rather than forcing a call.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-WHAT THIS SCRIPT DOES NOT DO
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  - Does NOT rescue ASVs whose top hits are "uncultured bacterium" at
-    high identity — these are genuinely unresolved in public databases.
-  - Does NOT separate genera that share identical V4 (e.g. classic
-    Escherichia/Shigella/Salmonella ambiguity). These remain ambiguous.
-  - Does NOT replace manual review. Review blast_summary_{marker}.tsv
-    and blast_refine_report_{marker}.txt before using --apply output
-    downstream.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-USAGE EXAMPLES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  # 16S — refine all ASVs SILVA stopped above genus, write patched TSV
-  python scripts/07d_blast_refine_unresolved.py \\
-      --taxonomy  qiime2/16S/all/taxonomy-exported/taxonomy.tsv \\
-      --rep-seqs  qiime2/16S/all/rep-seqs-exported/dna-sequences.fasta \\
-      --marker    16S \\
-      --blast-db  /home/share/databases/ncbi_nt/nt \\
-      --outdir    qiime2/16S/all/blast_refine/ \\
-      --apply
-
-  # Target specific uncl. labels only
-  python scripts/07d_blast_refine_unresolved.py \\
-      --taxonomy     qiime2/16S/all/taxonomy-exported/taxonomy.tsv \\
-      --rep-seqs     qiime2/16S/all/rep-seqs-exported/dna-sequences.fasta \\
-      --marker       16S \\
-      --blast-db     /home/share/databases/ncbi_nt/nt \\
-      --target-labels f__Enterobacteriaceae o__Lactobacillales \\
-      --outdir       qiime2/16S/all/blast_refine/
-
-  # Dry run — see candidate breakdown before running BLAST
-  python scripts/07d_blast_refine_unresolved.py \\
-      --taxonomy  qiime2/16S/all/taxonomy-exported/taxonomy.tsv \\
-      --rep-seqs  qiime2/16S/all/rep-seqs-exported/dna-sequences.fasta \\
-      --marker    16S \\
-      --blast-db  /home/share/databases/ncbi_nt/nt \\
-      --outdir    qiime2/16S/all/blast_refine/ \\
-      --dry-run
-
-  # Re-score with different dominance threshold (BLAST already done)
-  python scripts/07d_blast_refine_unresolved.py \\
-      --taxonomy        qiime2/16S/all/taxonomy-exported/taxonomy.tsv \\
-      --rep-seqs        qiime2/16S/all/rep-seqs-exported/dna-sequences.fasta \\
-      --marker          16S \\
-      --existing-blast  qiime2/16S/all/blast_refine/blast_results_16S.tsv \\
-      --dominance-threshold 0.60 \\
-      --outdir          qiime2/16S/all/blast_refine/
-
-Dependencies:
-  - BLAST+ (blastn on PATH)
-  - Local NCBI nt database with taxdb files alongside it
-    (taxdb.btd, taxdb.bti, taxonomy4blast.sqlite3) so sscinames resolve.
-    Set BLASTDB=/path/to/nt_dir or rely on the DB path.
-  - pip install pandas
+Requirements:
+    QIIME 2 (to export the .qza inputs) and BLAST+ (`blastn` on PATH). A local
+    nt database is strongly preferred over remote for speed and reproducibility.
 """
 
 from __future__ import annotations
@@ -121,6 +51,14 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+
+# --- make config_loader and the utils package importable regardless of cwd ---
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from config_loader import load_config, get_paths  # noqa: E402
+from utils import checkpoint, provenance, validate  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -643,7 +581,7 @@ def write_report(
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="07d_blast_refine_unresolved.py",
+        prog="blast_refine.py",
         description=(
             "BLAST-based refinement of ASVs poorly-classified at target rank. "
             "Runs blastn against a local NCBI nt database, scores top hits with "
@@ -654,47 +592,46 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=__doc__,
     )
 
-    req = p.add_argument_group("required arguments")
-    req.add_argument("--taxonomy", required=True, type=Path,
-                     help="Exported QIIME2 taxonomy TSV (Feature ID, Taxon, Confidence).")
-    req.add_argument("--rep-seqs", required=True, type=Path, dest="rep_seqs",
-                     help="Exported QIIME2 rep-seqs FASTA (dna-sequences.fasta).")
+    req = p.add_argument_group("inputs (derived from --marker + config if omitted)")
     req.add_argument("--marker", required=True,
-                     help="Marker name for output labeling (e.g. 16S, cytb).")
-    req.add_argument("--outdir", required=True, type=Path,
-                     help="Output directory for FASTA, BLAST results, summary, report.")
+                     help="Marker name (e.g. cytb, MiFish). Drives derived paths and config.")
+    req.add_argument("--config", default=None,
+                     help="Path to pipeline_config.yml.")
+    req.add_argument("--taxonomy", default=None, type=Path,
+                     help="Exported taxonomy TSV (Feature ID, Taxon, Confidence). Derived if omitted.")
+    req.add_argument("--rep-seqs", default=None, type=Path, dest="rep_seqs",
+                     help="Exported rep-seqs FASTA (dna-sequences.fasta). Derived if omitted.")
+    req.add_argument("--outdir", default=None, type=Path,
+                     help="Output directory. Default: results/<marker>/all/blast/")
 
-    bl = p.add_argument_group("BLAST options (one of --blast-db or --existing-blast required)")
+    bl = p.add_argument_group("BLAST options (--blast-db from analyses.blast.db, or --existing-blast)")
     bl.add_argument("--blast-db", default=None, dest="blast_db",
-                    help="Path to local BLAST nt database "
-                         "(e.g. /home/share/databases/ncbi_nt/nt).")
+                    help="Path to local BLAST nt database. Default: analyses.blast.db from config.")
     bl.add_argument("--existing-blast", default=None, type=Path, dest="existing_blast",
                     help="Use a pre-existing BLAST results TSV (skip BLAST step).")
     bl.add_argument("--num-threads", type=int, default=None, dest="num_threads",
                     help="BLAST threads. Default: os.cpu_count().")
-    bl.add_argument("--max-target-seqs", type=int, default=50, dest="max_target_seqs",
-                    help="Max BLAST hits per ASV. Default: 50. "
-                         "(10 is too few for common taxa; 50 balances coverage "
-                         "and runtime.)")
+    bl.add_argument("--max-target-seqs", type=int, default=None, dest="max_target_seqs",
+                    help="Max BLAST hits per ASV. Default: 50 (config: refine.max_target_seqs).")
     bl.add_argument("--min-pident", type=float, default=None, dest="min_pident",
-                    help="Minimum BLAST percent identity. Default: unset.")
+                    help="Minimum BLAST percent identity. Default: config refine.min_pident.")
 
     fi = p.add_argument_group("filter options")
     fi.add_argument("--target-rank", choices=list(RANK_PREFIXES.keys()),
-                    default="genus", dest="target_rank",
+                    default=None, dest="target_rank",
                     help="ASVs not classified to this rank are refined. Default: genus.")
     fi.add_argument("--target-labels", nargs="*", default=None, dest="target_labels",
                     help="Optional: restrict to specific taxonomy labels "
                          "(e.g. 'f__Enterobacteriaceae o__Lactobacillales'). "
                          "Applied as 'deepest classified rank equals this label'.")
-    fi.add_argument("--min-confidence", type=float, default=0.0, dest="min_confidence",
-                    help="Min classifier confidence for inclusion. Default: 0.0. "
-                         "Set to ~0.7 to skip noisy low-confidence classifications.")
-    fi.add_argument("--max-asvs", type=int, default=500, dest="max_asvs",
-                    help="Safety cap on candidate ASVs. Default: 500.")
+    fi.add_argument("--min-confidence", type=float, default=None, dest="min_confidence",
+                    help="Min classifier confidence for inclusion. Default: 0.0 "
+                         "(config: refine.min_confidence).")
+    fi.add_argument("--max-asvs", type=int, default=None, dest="max_asvs",
+                    help="Safety cap on candidate ASVs. Default: 500 (config: refine.max_asvs).")
 
     sc = p.add_argument_group("scoring options")
-    sc.add_argument("--dominance-threshold", type=float, default=0.70,
+    sc.add_argument("--dominance-threshold", type=float, default=None,
                     dest="dominance_threshold",
                     help="Fraction of top-identity hits a single genus must hold "
                          "to be promoted from 'ambiguous' to 'dominant'. Default: 0.70.")
@@ -712,13 +649,50 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
 
+    cfg = load_config(args.config)
+    paths = get_paths(cfg)
+    bcfg = cfg.analyses.get("blast", {})
+    rcfg = bcfg.get("refine", {})       # tool-specific knobs for blast_refine
+    marker = args.marker
+
+    # Derive inputs/outputs from the marker + config when not given explicitly.
+    if args.taxonomy is None:
+        args.taxonomy = paths.engine_taxonomy_exported_tsv(marker, "all")
+    if args.rep_seqs is None:
+        args.rep_seqs = paths.engine_rep_seqs_exported_fasta(marker, "all")
+    if args.outdir is None:
+        args.outdir = paths.engine_blast_results_dir(marker, "all")
+    if args.blast_db is None and args.existing_blast is None:
+        args.blast_db = bcfg.get("db") or None
+    # Config fills unset knobs (CLI still wins): db/num_threads are shared
+    # (top-level), the rest come from the analyses.blast.refine sub-block.
+    if args.num_threads is None:
+        args.num_threads = bcfg.get("num_threads")
+    if args.min_pident is None:
+        args.min_pident = rcfg.get("min_pident")
+    if args.target_rank is None:
+        args.target_rank = rcfg.get("target_rank", "genus")
+    if args.max_target_seqs is None:
+        args.max_target_seqs = rcfg.get("max_target_seqs", 50)
+    if args.max_asvs is None:
+        args.max_asvs = rcfg.get("max_asvs", 500)
+    if args.min_confidence is None:
+        args.min_confidence = rcfg.get("min_confidence", 0.0)
+    if args.dominance_threshold is None:
+        args.dominance_threshold = rcfg.get("dominance_threshold", 0.70)
+    if not args.apply:
+        args.apply = bool(rcfg.get("apply", False))
+
     # Validate
+    validate.require_qiime()
     if not args.taxonomy.exists():
-        log.error("Taxonomy file not found: %s", args.taxonomy); return 2
+        log.error("Taxonomy TSV not found: %s — export it (qiime tools export) "
+                  "or run the taxonomy stage first.", args.taxonomy); return 2
     if not args.rep_seqs.exists():
-        log.error("Rep-seqs FASTA not found: %s", args.rep_seqs); return 2
+        log.error("Rep-seqs FASTA not found: %s — export it first.", args.rep_seqs); return 2
     if not args.blast_db and not args.existing_blast:
-        log.error("Must provide either --blast-db or --existing-blast."); return 2
+        log.error("No BLAST database: set analyses.blast.db in the config, or pass "
+                  "--blast-db / --existing-blast."); return 2
     if args.existing_blast and not args.existing_blast.exists():
         log.error("Existing BLAST TSV not found: %s", args.existing_blast); return 2
 
@@ -807,9 +781,33 @@ def main(argv: Optional[List[str]] = None) -> int:
     log.info("  %-12s: %4d", "total called", called)
     log.info("=" * 60)
     if not args.apply:
-        log.info("Run with --apply to write a patched taxonomy TSV.")
+        log.info("Run with --apply (or set analyses.blast.apply) to write a "
+                 "patched taxonomy TSV. Review the report first.")
+
+    produced = [str(summary_path), str(report_path)]
+    if refined_out is not None:
+        produced.append(str(refined_out))
+    checkpoint.print_checkpoint(
+        cfg, "blast",
+        marker=marker,
+        produced=produced,
+        provenance={
+            "inputs": {"taxonomy": str(args.taxonomy), "rep_seqs": str(args.rep_seqs),
+                       "blast_db": str(args.blast_db) if args.blast_db else None,
+                       "existing_blast": str(args.existing_blast) if args.existing_blast else None},
+            "outputs": produced,
+            "command": "python " + " ".join([Path(sys.argv[0]).name, *sys.argv[1:]]),
+            "extra": {"target_rank": args.target_rank, "applied": bool(args.apply),
+                      "n_candidates": int(len(candidates)),
+                      "dominance_threshold": args.dominance_threshold},
+        },
+    )
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        sys.exit(main())
+    except validate.ValidationError as e:
+        log.error("%s", e)
+        sys.exit(1)

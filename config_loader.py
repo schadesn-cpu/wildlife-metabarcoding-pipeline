@@ -87,9 +87,11 @@ class PipelineConfig:
         self.groups         = data.get("groups", {})
         self.diversity_dirs = data.get("diversity_dirs", {})
         self.figures        = data.get("figures", {})
+        self.analyses       = data.get("analyses", {})
         self.ncbi           = data.get("ncbi", {})
         self.slurm          = data.get("slurm", {})
         self.samples        = data.get("samples", {})
+        self.qc             = data.get("qc", {})
 
     def resolve(self, rel_path: str) -> Path:
         """Resolve a config-relative path against the project root."""
@@ -332,23 +334,23 @@ def get_metadata_path(cfg: PipelineConfig, marker: str,
 def get_diversity_dir(cfg: PipelineConfig, marker: str,
                       analysis: str = "DvT") -> Path:
     """
-    Return the resolved core-metrics diversity directory path.
+    Return the core-metrics diversity directory for a marker + analysis.
+
+    Paths are DERIVED from the PathBuilder using the marker's rarefaction depth
+    and the analysis name, so the config only needs the depth (a parameter),
+    not a hand-written directory tree. If an explicit override happens to be
+    present under the optional 'diversity_dirs' config block it is honored, but
+    that block is no longer required and is omitted by default.
 
     Parameters
     ----------
     marker   : e.g. "16S", "MiFish"
-    analysis : "DvT" or "season"
-
-    Raises ValueError if the marker or analysis key is not in config.
+    analysis : "DvT", "season", etc. — becomes the {analysis} tag in the path
     """
-    try:
-        raw = cfg.diversity_dirs[marker][analysis]
-    except KeyError:
-        raise ValueError(
-            f"No diversity dir for marker={marker!r}, analysis={analysis!r}.\n"
-            f"  Check the 'diversity_dirs' section of {CONFIG_FILENAME}."
-        )
-    return cfg.resolve(raw)
+    override = cfg.diversity_dirs.get(marker, {}).get(analysis)
+    if override:
+        return cfg.resolve(override)
+    return get_paths(cfg).core_metrics_dir(marker, analysis)
 
 
 def get_classifier_path(cfg: PipelineConfig, marker: str) -> Path:
@@ -586,6 +588,111 @@ class PathBuilder:
     def diversity_dir(self, marker: str) -> Path:
         """qiime2/{marker}/diversity/"""
         return self._cfg.resolve(f"qiime2/{marker}/diversity")
+
+    # ── run_full engine I/O contract ─────────────────────────────────────────
+    # The engine (05_run_full_metabarcoding_pipeline.py) writes artifacts scoped
+    # by marker AND dataset: qiime2/{marker}/{dataset}/{stage}/{generic-name}
+    # (dataset defaults to 'all'; subsets like 'DvT' for cause-of-death). These
+    # methods describe that on-disk contract exactly — generic filenames, dataset
+    # in the path — which is distinct from the marker-suffixed results methods
+    # elsewhere in this class. The orchestrator reads engine outputs through
+    # these so the layout lives in one place, not in f-strings across pipeline.py.
+
+    def qiime2_root(self) -> Path:
+        """qiime2/  (the engine's --outdir)"""
+        return self._cfg.resolve("qiime2")
+
+    def reads_dir(self) -> Path:
+        """reads/"""
+        return self._cfg.resolve("reads")
+
+    def primers_detected_tsv(self) -> Path:
+        """reports/primers_detected.tsv  (written by the primer advisor)"""
+        return self._cfg.resolve("reports/primers_detected.tsv")
+
+    def engine_scope_dir(self, marker: str, dataset: str = "all") -> Path:
+        """qiime2/{marker}/{dataset}/"""
+        return self._cfg.resolve(f"qiime2/{marker}/{dataset}")
+
+    def engine_imported_dir(self, marker: str, dataset: str = "all") -> Path:
+        """qiime2/{marker}/{dataset}/imported/"""
+        return self.engine_scope_dir(marker, dataset) / "imported"
+
+    def engine_demux_qzv(self, marker: str, dataset: str = "all",
+                         trimmed: bool = False) -> Path:
+        """qiime2/{marker}/{dataset}/imported/demux[_trimmed].qzv"""
+        name = "demux_trimmed.qzv" if trimmed else "demux.qzv"
+        return self.engine_imported_dir(marker, dataset) / name
+
+    def engine_dada2_params_json(self, marker: str, dataset: str = "all") -> Path:
+        """qiime2/{marker}/{dataset}/imported/dada2_params.json (from dada2_advisor)"""
+        return self.engine_imported_dir(marker, dataset) / "dada2_params.json"
+
+    def engine_dada2_dir(self, marker: str, dataset: str = "all") -> Path:
+        """qiime2/{marker}/{dataset}/dada2/"""
+        return self.engine_scope_dir(marker, dataset) / "dada2"
+
+    def engine_denoising_stats_qza(self, marker: str, dataset: str = "all") -> Path:
+        """qiime2/{marker}/{dataset}/dada2/denoising-stats.qza"""
+        return self.engine_dada2_dir(marker, dataset) / "denoising-stats.qza"
+
+    def engine_table_qza(self, marker: str, dataset: str = "all",
+                         nocontrols: bool = False) -> Path:
+        """qiime2/{marker}/{dataset}/dada2/table[_no_controls].qza"""
+        name = "table_no_controls.qza" if nocontrols else "table.qza"
+        return self.engine_dada2_dir(marker, dataset) / name
+
+    def engine_rep_seqs_qza(self, marker: str, dataset: str = "all") -> Path:
+        """qiime2/{marker}/{dataset}/dada2/rep-seqs.qza"""
+        return self.engine_dada2_dir(marker, dataset) / "rep-seqs.qza"
+
+    def engine_taxonomy_exported_tsv(self, marker: str, dataset: str = "all") -> Path:
+        """qiime2/{marker}/{dataset}/taxonomy-exported/taxonomy.tsv (qiime tools export)"""
+        return self.engine_scope_dir(marker, dataset) / "taxonomy-exported" / "taxonomy.tsv"
+
+    def engine_rep_seqs_exported_fasta(self, marker: str, dataset: str = "all") -> Path:
+        """qiime2/{marker}/{dataset}/rep-seqs-exported/dna-sequences.fasta"""
+        return self.engine_scope_dir(marker, dataset) / "rep-seqs-exported" / "dna-sequences.fasta"
+
+    def engine_taxonomy_dir(self, marker: str, dataset: str = "all") -> Path:
+        """qiime2/{marker}/{dataset}/taxonomy/"""
+        return self.engine_scope_dir(marker, dataset) / "taxonomy"
+
+    def engine_taxonomy_qza(self, marker: str, dataset: str = "all") -> Path:
+        """qiime2/{marker}/{dataset}/taxonomy/taxonomy.qza"""
+        return self.engine_taxonomy_dir(marker, dataset) / "taxonomy.qza"
+
+    def engine_diversity_dir(self, marker: str, dataset: str = "all") -> Path:
+        """qiime2/{marker}/{dataset}/diversity/"""
+        return self.engine_scope_dir(marker, dataset) / "diversity"
+
+    def engine_results_dir(self, marker: str, dataset: str = "all") -> Path:
+        """results/{marker}/{dataset}/"""
+        return self._cfg.resolve(f"results/{marker}/{dataset}")
+
+    def engine_taxonomy_results_dir(self, marker: str, dataset: str = "all") -> Path:
+        """results/{marker}/{dataset}/taxonomy/"""
+        return self.engine_results_dir(marker, dataset) / "taxonomy"
+
+    def engine_diversity_results_dir(self, marker: str, dataset: str = "all") -> Path:
+        """results/{marker}/{dataset}/diversity/"""
+        return self.engine_results_dir(marker, dataset) / "diversity"
+
+    def engine_rarefaction_results_dir(self, marker: str, dataset: str = "all") -> Path:
+        """results/{marker}/{dataset}/rarefaction/"""
+        return self.engine_results_dir(marker, dataset) / "rarefaction"
+
+    def engine_presence_absence_results_dir(self, marker: str, dataset: str = "all") -> Path:
+        """results/{marker}/{dataset}/presence_absence/"""
+        return self.engine_results_dir(marker, dataset) / "presence_absence"
+
+    def engine_blast_results_dir(self, marker: str, dataset: str = "all") -> Path:
+        """results/{marker}/{dataset}/blast/"""
+        return self.engine_results_dir(marker, dataset) / "blast"
+
+    def engine_manifest_tsv(self, marker: str) -> Path:
+        """qiime2/{marker}/imported/manifest_{marker}.tsv (no dataset; matches make_manifests)"""
+        return self._cfg.resolve(f"qiime2/{marker}/imported/manifest_{marker}.tsv")
 
     def rarefied_table_qza(self, marker: str, analysis: str) -> Path:
         """qiime2/{marker}/diversity/{r}_{ analysis}/core_metrics/rarefied_table.qza"""

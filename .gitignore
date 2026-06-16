@@ -26,3 +26,5 @@ file_inventory.csv
 *.mldist
 *.splits.nex
 *.iqtree
+*.zip
+*.biom

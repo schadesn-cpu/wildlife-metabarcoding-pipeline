@@ -87,70 +87,6 @@ def which_or_die(exe: str) -> str:
         )
     return found
 
-def deep_update(base: Dict[str, Any], upd: Dict[str, Any]) -> Dict[str, Any]:
-    """Recursively merge upd into base (returns base)."""
-    for k, v in upd.items():
-        if isinstance(v, dict) and isinstance(base.get(k), dict):
-            deep_update(base[k], v)
-        else:
-            base[k] = v
-    return base
-
-
-def load_config_file(path: Path) -> Dict[str, Any]:
-    """Load a config file. Supports YAML (if PyYAML installed) or JSON."""
-    require_exists(path, "Config file")
-    suffix = path.suffix.lower()
-
-    if suffix in [".yaml", ".yml"]:
-        try:
-            import yaml  # type: ignore
-        except ImportError as e:
-            raise RuntimeError(
-                f"PyYAML is required to read YAML configs but is not installed.\n"
-                f"Install it with: pip install pyyaml\n"
-                f"Or use a JSON config instead.\n"
-                f"Config path: {path}"
-            ) from e
-        with path.open("r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-        if not isinstance(data, dict):
-            raise ValueError(f"YAML config must be a mapping/dict: {path}")
-        return data
-
-    if suffix == ".json":
-        with path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        if not isinstance(data, dict):
-            raise ValueError(f"JSON config must be an object/dict: {path}")
-        return data
-
-    raise ValueError(f"Unsupported config file type: {path} (use .yml/.yaml or .json)")
-
-
-def load_combined_config(project_root: Path, marker: str, config_path: Optional[str]) -> Dict[str, Any]:
-    """
-    Load defaults + marker defaults + optional user config.
-    Precedence (later overrides earlier):
-      defaults.yml -> markers/{marker}.yml -> user --config
-    """
-    cfg: Dict[str, Any] = {}
-
-    defaults = project_root / "config" / "defaults.yml"
-    marker_cfg = project_root / "config" / "markers" / f"{marker}.yml"
-
-    if defaults.exists():
-        deep_update(cfg, load_config_file(defaults))
-    if marker_cfg.exists():
-        deep_update(cfg, load_config_file(marker_cfg))
-    if config_path:
-        user_cfg = Path(config_path)
-        if not user_cfg.is_absolute():
-            user_cfg = (project_root / user_cfg).resolve()
-        deep_update(cfg, load_config_file(user_cfg))
-
-    return cfg
-
 
 @dataclass(frozen=True)
 class Context:
@@ -158,7 +94,6 @@ class Context:
     marker: str
     dataset: str
     metadata: Path
-    config: Dict[str, Any]
 
     qiime2_root: Path
     results_root: Path
@@ -192,20 +127,6 @@ class Context:
     def commands_file(self) -> Path:
         """Return the path to the running commands shell log for this scope."""
         return self.rdir("commands.sh")
-
-    def get_cfg(self, *keys: str, default=None):
-        """
-Retrieve a nested value from the YAML config by a chain of keys.
-
-        Returns default if any key in the chain is missing or if the value at
-        that level is not a dict. Example: ctx.get_cfg('dada2', 'trunc_len_f').
-        """
-        cur: Any = self.config
-        for k in keys:
-            if not isinstance(cur, dict) or k not in cur:
-                return default
-            cur = cur[k]
-        return cur
 
 
 def cmd_smoke_test(args: argparse.Namespace, ctx: Context) -> None:
@@ -288,12 +209,12 @@ def run_cmd(cmd: Sequence[str], ctx: Context, subcmd: str, cwd: Optional[Path] =
     with cmd_sh.open("a", encoding="utf-8") as cf:
         cf.write(" ".join(cmd) + "\n")
 
-        # Stream to terminal as well
-        sys.stdout.write(proc.stdout)
-        sys.stdout.flush()
+    # Stream to terminal as well
+    sys.stdout.write(proc.stdout)
+    sys.stdout.flush()
 
-        if proc.returncode != 0:
-            raise RuntimeError(f"Command failed (exit={proc.returncode}). See log: {log_path}")
+    if proc.returncode != 0:
+        raise RuntimeError(f"Command failed (exit={proc.returncode}). See log: {log_path}")
 
 
 def maybe_overwrite(path: Path, ctx: Context) -> None:
@@ -1159,7 +1080,6 @@ Build and return the top-level argument parser for 03_run_full_metabarcoding_pip
     p.add_argument("--dry-run", action="store_true", help="Print commands without running.")
     p.add_argument("--force", action="store_true", help="Overwrite existing outputs.")
     p.add_argument("--verbose", action="store_true", help="Print commands as they run.")
-    p.add_argument("--config", default=None, help="Optional YAML/JSON config to override defaults.")
     p.add_argument("--print-paths", action="store_true", help="Print computed output paths for this marker/dataset and exit.")
 
     sp = p.add_subparsers(dest="command", required=True)
@@ -1386,8 +1306,6 @@ Build a Context dataclass from parsed command-line arguments.
     results_root = (project_root / args.results_root).resolve()
     logs_root = (project_root / args.logs_root).resolve()
 
-    cfg = load_combined_config(project_root, marker, args.config)
-
     return Context(
         project_root=project_root,
         marker=marker,
@@ -1400,7 +1318,6 @@ Build a Context dataclass from parsed command-line arguments.
         verbose=args.verbose,
         dry_run=args.dry_run,
         force=args.force,
-        config=cfg,
     )
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

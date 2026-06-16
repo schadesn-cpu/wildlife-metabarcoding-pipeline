@@ -1,68 +1,48 @@
 #!/usr/bin/env python3
 """
-04e_parse_multiqc_demux.py
-======================
-Parse the Illumina demultiplex report directory and MultiQC FastQC data
-to produce a pre-DADA2 QC report without needing cutadapt logs or a
-QIIME2 environment.
+parse_demux.py
+==============
+Step: parse_demux
 
-Designed for the pipeline report structure:
-  reports/
-  ├── primers_detected.tsv               ← from primer_advisor detect
-  └── demultiplex/
-      ├── Demultiplex_Stats.csv           ← total reads per sample
-      └── additional-reports/
-          ├── Adapter_Metrics.csv         ← % adapter bases per sample
-          ├── Adapter_Cycle_Metrics.csv   ← adapter counts per cycle (dimer signal)
-          └── multiqc_data/
-              ├── fastqc_adapter_content_plot.txt   ← adapter position curves
-              ├── fastqc_sequence_counts_plot.txt   ← unique vs duplicate reads
-              └── fastqc_per_base_sequence_quality_plot.txt
+Purpose:
+    Parse Illumina demultiplex reports and MultiQC FastQC data into a pre-DADA2
+    QC report — without cutadapt logs or a QIIME 2 environment. Answers, per
+    sample:
+      1. Read count vs a minimum threshold (low-depth flag)
+      2. Adapter detection rate (did cutadapt have something to trim?)
+      3. Effective amplicon length (from where the adapter onsets in the read)
+      4. Dimer signal (adapter appearing very early — probable primer-dimer)
+      5. Quality drop-off position (informs DADA2 --trunc-len)
+      6. Primer identity cross-check
 
-What this script answers — directly mapping to Joe's checklist:
+Inputs:
+    reports/
+    ├── primers_detected.tsv                 (from the primer advisor)
+    └── demultiplex/
+        ├── Demultiplex_Stats.csv            (reads per sample)
+        └── additional-reports/
+            ├── Adapter_Metrics.csv          (% adapter bases per sample)
+            ├── Adapter_Cycle_Metrics.csv    (per-cycle counts — dimer signal)
+            └── multiqc_data/
+                ├── fastqc_adapter_content_plot.txt
+                └── fastqc_per_base_sequence_quality_plot.txt
+    pipeline_config.yml   active_markers, samples.control_prefixes, and optional
+                          markers.<m>.amplicon_length / qc.min_reads
 
-  1. Read counts per sample (≥10k threshold)
-     Source: Demultiplex_Stats.csv
+Outputs:
+    results/qc/demux_qc_report.txt       (full formatted report)
+    results/qc/demux_read_counts.tsv     (per-sample summary)
+    logs/run_manifest.jsonl              (run appended on completion)
 
-  2. Adapter detection rate — did the adapter appear in reads?
-     (proxy for: did cutadapt have something to trim?)
-     Source: Adapter_Metrics.csv  → % Adapter Bases per sample
+Markers are inferred from sample names using active_markers from config.
+Exit code is non-zero if any FAIL-level (❌) issues are detected.
 
-  3. Effective amplicon length — where in the read does the adapter appear?
-     (Joe: "where the adapter is in the read tells you the length")
-     Source: fastqc_adapter_content_plot.txt → modal adapter onset position
+Usage:
+    python parse_demux.py [--reports-dir reports/] [--min-reads 10000]
+    python parse_demux.py --amplicon-lens 16S=253,MiFish=180,cytb=307
 
-  4. Dimer signal — does adapter appear very early in reads?
-     Source: Adapter_Cycle_Metrics.csv → per-cycle counts at short positions
-
-  5. Quality dropoff position — where does Q25 median quality fail?
-     (informs DADA2 trunc-len)
-     Source: fastqc_per_base_sequence_quality_plot.txt
-
-  6. Primer identity cross-check
-     Source: primers_detected.tsv
-
-Markers are inferred from sample names using the same marker tokens
-as the rest of the pipeline (16S, 18S, ITS, MiFish/Mifish, cytb, Virus).
-
-Usage
------
-  # From project root — paths resolved automatically
-  python parse_multiqc_demux.py \\
-      --reports-dir  reports/ \\
-      --primers      reports/primers_detected.tsv \\
-      --min-reads    10000 \\
-      --out-tsv      results/qc/demux_qc_report.tsv \\
-      --out-txt      results/qc/demux_qc_report.txt
-
-  # Override the amplicon lengths if known
-  python parse_multiqc_demux.py \\
-      --reports-dir  reports/ \\
-      --primers      reports/primers_detected.tsv \\
-      --amplicon-lens 16S=253,MiFish=180,cytb=307,18S=130,Virus=110 \\
-      --min-reads    10000
-
-Dependencies: Python >= 3.8, pandas
+Requirements:
+    Python >= 3.8, pandas. No QIIME 2 needed.
 """
 from __future__ import annotations
 
@@ -76,6 +56,14 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
+# --- make config_loader and the utils package importable regardless of cwd ---
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from config_loader import load_config, get_paths            # noqa: E402
+from utils import checkpoint, provenance                    # noqa: E402
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -84,8 +72,9 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ── Marker inference ──────────────────────────────────────────────────────────
-# Maps token found in sample name → canonical marker label.
-# Checked in order; first match wins. Longer/more specific tokens first.
+# Default token→marker map. Overridden at runtime by tokens built from
+# active_markers in config (see build_marker_tokens), so this is only a
+# fallback for standalone use without a config.
 MARKER_TOKENS = [
     ("MiFish",  "MiFish"),
     ("Mifish",  "MiFish"),
@@ -101,35 +90,51 @@ MARKER_TOKENS = [
 ]
 
 # ---------------------------------------------------------------------------
-# Amplicon length defaults — LOON PROJECT SPECIFIC
+# Amplicon length defaults (bp, excluding primers)
 # ---------------------------------------------------------------------------
-# These are the expected amplicon lengths (bp, excluding primers) for the
-# loon metabarcoding project. They are used in section 3 of the report to
-# flag deviations between where the adapter actually appeared in the read
-# and where it should have appeared given the amplicon length.
-#
-# VERIFY THESE BEFORE RUNNING ON ANY OTHER PROJECT.
-#
-# Override any or all of them at the command line with --amplicon-lens:
-#   --amplicon-lens 16S=253,MiFish=180,cytb=307,Virus=110
-#
-# Sources:
-#   16S   253 bp  V4 region, 515F/806R (Caporaso et al. 2011)
-#   MiFish 180 bp  12S MiFish-U amplicon (Miya et al. 2015)
-#   cytb  307 bp  L14841/H15149 amplicon — VERIFY against your reference
-#   18S   130 bp  V9 1391F/EukBr — rough estimate, verify if used
-#   Virus 110 bp  Herpesvirus fragment (confirmed by Joe consultation)
-LOON_PROJECT_AMPLICON_LENS: Dict[str, int] = {
+# Standard expected amplicon sizes for common markers, used in section 3 to
+# flag deviations between where the adapter actually appears in the read and
+# where it should given the amplicon length. These are generic defaults — set
+# markers.<m>.amplicon_length in config, or pass --amplicon-lens, to override.
+#   16S 253 bp (V4 515F/806R) · MiFish 180 bp (12S MiFish-U) · cytb ~307 bp
+#   18S ~130 bp (V9 1391F/EukBr) · ITS variable (rough midpoint, unreliable)
+DEFAULT_AMPLICON_LENS: Dict[str, int] = {
     "16S":    253,
     "18S":    130,
-    "ITS":    250,   # variable-length; rough midpoint — not reliable for adapter check
+    "ITS":    250,
     "MiFish": 180,
-    "cytb":   307,   # verify against reference before trusting this check
+    "cytb":   307,
     "Virus":  110,
 }
 
-# Controls to flag separately in output (not included in pass/fail counts)
+# Control-sample prefixes; overridden at runtime from samples.control_prefixes.
 CONTROL_PREFIXES = ("NTC-", "PAC-", "XB-", "NTC_", "PAC_", "XB_")
+
+
+def build_marker_tokens(active_markers: List[str]) -> List[Tuple[str, str]]:
+    """
+    Build a token→marker map from the project's active markers, covering common
+    case variants, so marker inference works for any project without a hardcoded
+    list. Longer marker names are checked first so e.g. 'MiFish' wins before a
+    substring could match something shorter.
+    """
+    tokens: List[Tuple[str, str]] = []
+    for m in sorted(active_markers, key=len, reverse=True):
+        for variant in (m, m.lower(), m.upper(), m.capitalize()):
+            if (variant, m) not in tokens:
+                tokens.append((variant, m))
+    return tokens
+
+
+def build_control_prefixes(cfg_prefixes: List[str]) -> Tuple[str, ...]:
+    """Expand configured control prefixes to cover both '-' and '_' separators."""
+    out: List[str] = []
+    for p in cfg_prefixes:
+        base = p.rstrip("-_")
+        for sep in ("-", "_"):
+            if (base + sep) not in out:
+                out.append(base + sep)
+    return tuple(out)
 
 
 def infer_marker(sample_name: str) -> str:
@@ -432,7 +437,7 @@ def load_primers(path: Path) -> Dict[str, Tuple[int, int, float, float]]:
     The score is already a percentage string like '44%' — we strip the
     percent sign and convert to float.
     """
-    df = pd.read_csv(path, dtype=str)
+    df = pd.read_csv(path, sep="\t", dtype=str)
     result: Dict[str, Tuple[int, int, float, float]] = {}
 
     for _, row in df.iterrows():
@@ -829,8 +834,12 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument(
-        "--reports-dir", required=True, type=Path,
-        help="Path to reports/ directory (contains demultiplex/ subdirectory).",
+        "--reports-dir", default=None, type=Path,
+        help="Path to reports/ directory (default: 'reports/' under project root).",
+    )
+    p.add_argument(
+        "--config", default=None,
+        help="Path to pipeline_config.yml.",
     )
     p.add_argument(
         "--primers", default=None, type=Path,
@@ -841,12 +850,13 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Override default amplicon lengths. Format: Marker=bp,Marker=bp ...\n"
             "Example: --amplicon-lens 16S=253,MiFish=180,cytb=307,Virus=110\n"
-            f"Defaults: {', '.join(f'{k}={v}' for k,v in LOON_PROJECT_AMPLICON_LENS.items())}"
+            f"Defaults: {', '.join(f'{k}={v}' for k,v in DEFAULT_AMPLICON_LENS.items())}"
         ),
     )
     p.add_argument(
-        "--min-reads", type=int, default=10000,
-        help="Minimum acceptable read count per sample. Default: 10000",
+        "--min-reads", type=int, default=None,
+        help="Minimum acceptable read count per sample "
+             "(default: qc.min_reads in config, else 10000).",
     )
     p.add_argument(
         "--out-txt", default=None, type=Path,
@@ -859,94 +869,105 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main() -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     """
-    Parse the demultiplex and MultiQC data directories, run all QC checks,
-    print the formatted report, and optionally write TSV and text outputs.
-
-    Returns 0 on success, 1 if any FAIL-level issues were detected.
+    Load demultiplex + MultiQC data, run all QC checks, print and write the
+    report, and append the run to the ledger. Returns non-zero if any
+    FAIL-level (❌) issue is detected.
     """
-    args = build_parser().parse_args()
+    global MARKER_TOKENS, CONTROL_PREFIXES
+    args = build_parser().parse_args(argv)
 
-    reports_dir = args.reports_dir.resolve()
+    cfg = load_config(args.config)
+    paths = get_paths(cfg)
+
+    # Marker inference and control detection come from config, not a hardcoded
+    # list, so this works for any project's markers and naming scheme.
+    MARKER_TOKENS = build_marker_tokens(cfg.active_markers)
+    control_cfg = cfg.samples.get("control_prefixes", [])
+    if control_cfg:
+        CONTROL_PREFIXES = build_control_prefixes(control_cfg)
+
+    reports_dir = (args.reports_dir or cfg.resolve("reports")).resolve()
     if not reports_dir.is_dir():
         log.error("--reports-dir not found: %s", reports_dir)
         return 1
 
-    # Resolve standard sub-paths
-    demux_dir     = reports_dir / "demultiplex"
-    addl_dir      = demux_dir  / "additional-reports"
-    mqc_dir       = addl_dir   / "multiqc_data"
+    demux_dir = reports_dir / "demultiplex"
+    addl_dir  = demux_dir / "additional-reports"
+    mqc_dir   = addl_dir / "multiqc_data"
 
-    demux_stats_path      = demux_dir  / "Demultiplex_Stats.csv"
-    adapter_metrics_path  = addl_dir   / "Adapter_Metrics.csv"
-    adapter_cycle_path    = addl_dir   / "Adapter_Cycle_Metrics.csv"
-    adapter_content_path  = mqc_dir    / "fastqc_adapter_content_plot.txt"
-    quality_path          = mqc_dir    / "fastqc_per_base_sequence_quality_plot.txt"
-
+    demux_stats_path     = demux_dir / "Demultiplex_Stats.csv"
+    adapter_metrics_path = addl_dir / "Adapter_Metrics.csv"
+    adapter_cycle_path   = addl_dir / "Adapter_Cycle_Metrics.csv"
+    adapter_content_path = mqc_dir / "fastqc_adapter_content_plot.txt"
+    quality_path         = mqc_dir / "fastqc_per_base_sequence_quality_plot.txt"
     primers_path = args.primers or (reports_dir / "primers_detected.tsv")
 
-    # Amplicon lengths
-    amplicon_lens = dict(LOON_PROJECT_AMPLICON_LENS)
+    # Amplicon lengths: generic defaults <- per-marker config <- CLI override
+    amplicon_lens = dict(DEFAULT_AMPLICON_LENS)
+    for m in cfg.active_markers:
+        cfg_len = cfg.markers.get(m, {}).get("amplicon_length")
+        if cfg_len:
+            amplicon_lens[m] = int(cfg_len)
     if args.amplicon_lens:
         amplicon_lens.update(parse_amplicon_lens(args.amplicon_lens))
 
-    # ── Load all data files ───────────────────────────────────────────────
+    # min reads: CLI <- qc.min_reads in config <- 10000
+    qc_cfg = cfg.qc if isinstance(getattr(cfg, "qc", {}), dict) else {}
+    min_reads = args.min_reads if args.min_reads is not None else int(qc_cfg.get("min_reads", 10000))
+
     log.info("Loading data files from: %s", reports_dir)
-
-    demux_counts = (parse_demultiplex_stats(demux_stats_path)
-                    if demux_stats_path.exists()
+    demux_counts = (parse_demultiplex_stats(demux_stats_path) if demux_stats_path.exists()
                     else (log.warning("Not found: %s", demux_stats_path) or {}))
-
-    adapter_metrics = (parse_adapter_metrics(adapter_metrics_path)
-                       if adapter_metrics_path.exists()
+    adapter_metrics = (parse_adapter_metrics(adapter_metrics_path) if adapter_metrics_path.exists()
                        else (log.warning("Not found: %s", adapter_metrics_path) or {}))
-
-    adapter_cycle = (parse_adapter_cycle_metrics(adapter_cycle_path)
-                     if adapter_cycle_path.exists()
+    adapter_cycle = (parse_adapter_cycle_metrics(adapter_cycle_path) if adapter_cycle_path.exists()
                      else (log.warning("Not found: %s", adapter_cycle_path) or {}))
-
-    adapter_content = (parse_adapter_content(adapter_content_path)
-                       if adapter_content_path.exists()
+    adapter_content = (parse_adapter_content(adapter_content_path) if adapter_content_path.exists()
                        else (log.warning("Not found: %s", adapter_content_path) or {}))
-
-    quality_profiles = (parse_quality_profiles(quality_path)
-                        if quality_path.exists()
+    quality_profiles = (parse_quality_profiles(quality_path) if quality_path.exists()
                         else (log.warning("Not found: %s", quality_path) or {}))
-
-    primers = (load_primers(primers_path)
-               if primers_path.exists()
+    primers = (load_primers(primers_path) if primers_path.exists()
                else (log.warning("Not found: %s", primers_path) or {}))
 
-    # ── Build report ──────────────────────────────────────────────────────
     report_text, summary_df = build_report(
-        demux_counts     = demux_counts,
-        adapter_metrics  = adapter_metrics,
-        adapter_cycle    = adapter_cycle,
-        adapter_content  = adapter_content,
-        quality_profiles = quality_profiles,
-        primers          = primers,
-        amplicon_lens    = amplicon_lens,
-        min_reads        = args.min_reads,
+        demux_counts=demux_counts, adapter_metrics=adapter_metrics,
+        adapter_cycle=adapter_cycle, adapter_content=adapter_content,
+        quality_profiles=quality_profiles, primers=primers,
+        amplicon_lens=amplicon_lens, min_reads=min_reads,
     )
-
     print(report_text)
 
-    # ── Optional outputs ──────────────────────────────────────────────────
-    if args.out_txt:
-        args.out_txt.parent.mkdir(parents=True, exist_ok=True)
-        args.out_txt.write_text(report_text, encoding="utf-8")
-        log.info("Report written: %s", args.out_txt)
+    # Default output locations via the PathBuilder (results/qc/), overridable.
+    qc_dir  = paths.qc_dir()
+    out_txt = args.out_txt or (qc_dir / "demux_qc_report.txt")
+    out_tsv = args.out_tsv or (qc_dir / "demux_read_counts.tsv")
 
-    if args.out_tsv and not summary_df.empty:
-        args.out_tsv.parent.mkdir(parents=True, exist_ok=True)
-        summary_df.to_csv(args.out_tsv, sep="\t", index=False)
-        log.info("TSV written: %s", args.out_tsv)
+    out_txt.parent.mkdir(parents=True, exist_ok=True)
+    out_txt.write_text(report_text, encoding="utf-8")
+    log.info("Report written: %s", out_txt)
+    written = [out_txt]
+    if not summary_df.empty:
+        out_tsv.parent.mkdir(parents=True, exist_ok=True)
+        summary_df.to_csv(out_tsv, sep="\t", index=False)
+        log.info("TSV written: %s", out_tsv)
+        written.append(out_tsv)
 
-    # Exit non-zero if any FAIL-level issues were detected
-    fail_keywords = ["below", "dimer rate", "probable dimer", "low primer"]
-    report_lower = report_text.lower()
-    if any("❌" in line for line in report_text.splitlines()):
+    has_fail = any("❌" in line for line in report_text.splitlines())
+
+    checkpoint.print_checkpoint(
+        cfg, "parse_demux",
+        produced=written,
+        provenance={
+            "outputs": written,
+            "command": "python " + " ".join([Path(sys.argv[0]).name, *sys.argv[1:]]),
+            "extra": {"min_reads": min_reads, "qc_fail": has_fail},
+        },
+    )
+
+    if has_fail:
+        log.warning("QC flagged FAIL-level (❌) issues — review the report above.")
         return 1
     return 0
 

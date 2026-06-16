@@ -1,66 +1,43 @@
 #!/usr/bin/env python3
 """
-02_merge_run_dirs.py
-====================
-Merge multiple sequencing run directories (each containing flat FASTQ files)
-into a single reads/ directory tree ready for 01_make_manifests.py.
+merge_runs.py
+=============
+Step: merge_runs
 
-Expected input layout (one or more run dirs, FASTQs flat inside):
-    run1/
-        TV230084-GI-16S_S1492_L002_R1_001.fastq.gz
-        TV230084-GI-16S_S1492_L002_R2_001.fastq.gz
-        TV230084-GI-cytb_S10_L002_R1_001.fastq.gz
-        TV230084-GI-cytb_S10_L002_R2_001.fastq.gz
-    run2/
-        TV240010-GI-16S_S5_R1_001.fastq.gz
-        ...
+Purpose:
+    Merge multiple sequencing run directories (each containing flat FASTQ files)
+    into a single marker-split reads/ tree ready for the manifest step.
 
-Output layout (ready for 01_make_manifests.py):
-    reads/
-    ├── 16S/
-    │   ├── TV230084-GI-16S_S1492_L002_R1_001.fastq.gz  (symlink → run1/...)
-    │   └── ...
-    └── cytb/
-        ├── TV230084-GI-cytb_S10_L002_R1_001.fastq.gz   (symlink → run1/...)
-        └── ...
+Inputs:
+    One or more run directories (--run-dirs), each with flat FASTQs:
+        run1/  TV...-16S_S1492_L002_R1_001.fastq.gz, ...-cytb_..._R2_..., ...
+        run2/  ...
+    pipeline_config.yml   active_markers (default marker tokens), reads/ location
+
+Outputs:
+    reads/<marker>/   per-marker FASTQs (symlinks by default, or copies with --copy)
+    reads/collision_report.tsv   any duplicate filenames across run dirs
+    logs/run_manifest.jsonl      run appended on completion
 
 Marker detection:
-    Files are assigned to a marker directory based on a case-insensitive token
-    search in the filename.  Default tokens: 16S, cytb.
-    Override with --markers.
+    Files are assigned to a marker directory by a case-insensitive whole-token
+    match in the filename (so '16S' will not match inside a longer token).
+    Tokens default to active_markers from config; override with --markers.
 
 Collision handling:
-    If the same filename appears in two run dirs, the script aborts by default.
-    Use --on-collision warn  to keep the first copy and log a warning.
-    Use --on-collision skip  to silently skip duplicates.
-    (Collisions are also written to <outdir>/collision_report.tsv)
+    If the same filename appears in two run dirs the script aborts by default.
+    --on-collision warn keeps the first copy and logs; skip keeps it silently.
 
-Usage examples:
-
-    # Dry run — see what would be linked, nothing written:
-    python 00_merge_run_dirs.py \\
-        --run-dirs run1/ run2/ run3/ \\
-        --out-reads reads/ \\
-        --markers 16S cytb \\
-        --dry-run
-
-    # Real run with symlinks (default, saves disk):
-    python 00_merge_run_dirs.py \\
-        --run-dirs /data/run1 /data/run2 \\
-        --out-reads reads/ \\
-        --markers 16S cytb
-
-    # Copy files instead of symlinking (safer for long-term archiving):
-    python 00_merge_run_dirs.py \\
-        --run-dirs run1/ run2/ \\
-        --out-reads reads/ \\
-        --copy
-
+Usage:
+    # Preview only:
+    python merge_runs.py --run-dirs run1/ run2/ --dry-run
+    # Real merge (symlinks) into the configured reads/ dir:
+    python merge_runs.py --run-dirs /data/run1 /data/run2
     # Then build manifests:
-    python 01_make_manifests.py --reads-dir reads/ --outdir qiime2/imported/
+    python make_manifests.py
 
 Requirements:
-    Python >= 3.8  (standard library only)
+    Python >= 3.8  (standard library only for the merge; pyyaml via config_loader)
 """
 
 from __future__ import annotations
@@ -74,6 +51,14 @@ import shutil
 import sys
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional, Tuple
+
+# --- make config_loader and the utils package importable regardless of cwd ---
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from config_loader import load_config, get_paths            # noqa: E402
+from utils import checkpoint, provenance                    # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -89,8 +74,6 @@ log = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 FASTQ_SUFFIXES = {".fastq", ".fastq.gz", ".fq", ".fq.gz"}
-
-DEFAULT_MARKERS = ["16S", "cytb"]
 
 
 # ---------------------------------------------------------------------------
@@ -359,13 +342,7 @@ def merge(
     if had_warnings:
         log.warning("Completed with warnings — review messages above.")
 
-    log.info("")
-    log.info("Next step:")
-    log.info("  python 01_make_manifests.py \\")
-    log.info("      --reads-dir %s \\", out_reads)
-    log.info("      --outdir qiime2/imported/ \\")
-    log.info("      --markers %s", " ".join(markers))
-
+    # Next-step guidance is printed by the backbone checkpoint (see main()).
     return 0
 
 
@@ -375,28 +352,28 @@ def merge(
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="00_merge_run_dirs.py",
+        prog="merge_runs.py",
         description=(
             "Merge multiple flat sequencing run directories into a single "
-            "reads/ tree ready for 01_make_manifests.py."
+            "marker-split reads/ tree ready for the manifest step."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Dry run — preview only:
-  python 00_merge_run_dirs.py --run-dirs run1/ run2/ --out-reads reads/ --dry-run
+  python merge_runs.py --run-dirs run1/ run2/ --dry-run
 
   # Real merge with symlinks (default):
-  python 00_merge_run_dirs.py --run-dirs /data/run1 /data/run2 --out-reads reads/
+  python merge_runs.py --run-dirs /data/run1 /data/run2
 
   # Copy files (for archiving or portability):
-  python 00_merge_run_dirs.py --run-dirs run1/ run2/ --out-reads reads/ --copy
+  python merge_runs.py --run-dirs run1/ run2/ --copy
 
   # Warn instead of aborting on duplicate filenames:
-  python 00_merge_run_dirs.py --run-dirs run1/ run2/ --out-reads reads/ --on-collision warn
+  python merge_runs.py --run-dirs run1/ run2/ --on-collision warn
 
   # Then build manifests:
-  python 01_make_manifests.py --reads-dir reads/ --outdir qiime2/imported/ --markers 16S cytb
+  python make_manifests.py
 """,
     )
 
@@ -411,22 +388,24 @@ Examples:
     p.add_argument(
         "--out-reads",
         type=Path,
-        default=Path("reads"),
+        default=None,
         metavar="DIR",
         help=(
             "Output reads directory. Per-marker subdirectories are created inside. "
-            "Default: ./reads"
+            "Default: 'reads/' under the project root."
         ),
+    )
+    p.add_argument(
+        "--config",
+        default=None,
+        help="Path to pipeline_config.yml.",
     )
     p.add_argument(
         "--markers",
         nargs="+",
-        default=DEFAULT_MARKERS,
+        default=None,
         metavar="MARKER",
-        help=(
-            f"Marker tokens to detect in filenames. "
-            f"Default: {' '.join(DEFAULT_MARKERS)}"
-        ),
+        help="Marker tokens to detect in filenames. Default: active_markers from config.",
     )
     p.add_argument(
         "--on-collision",
@@ -471,6 +450,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    cfg = load_config(args.config)
+    paths = get_paths(cfg)
+
     # Resolve and validate run dirs
     run_dirs: List[Path] = []
     for rd in args.run_dirs:
@@ -480,8 +462,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 1
         run_dirs.append(resolved)
 
-    out_reads = args.out_reads.resolve()
-    markers = args.markers
+    out_reads = (args.out_reads or cfg.resolve("reads")).resolve()
+    markers = args.markers if args.markers is not None else list(cfg.active_markers)
+    if not markers:
+        log.error("No markers to detect: pass --markers or set active_markers in config.")
+        return 1
 
     log.info("Run directories (%d):", len(run_dirs))
     for rd in run_dirs:
@@ -494,7 +479,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         log.info("Mode             : DRY RUN")
     log.info("")
 
-    return merge(
+    rc = merge(
         run_dirs=run_dirs,
         out_reads=out_reads,
         markers=markers,
@@ -502,6 +487,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         copy=args.copy,
         dry_run=args.dry_run,
     )
+
+    if rc == 0 and not args.dry_run:
+        checkpoint.print_checkpoint(
+            cfg, "merge_runs",
+            produced=[out_reads / m for m in markers],
+            provenance={
+                "inputs": {f"run_dir_{i}": rd for i, rd in enumerate(run_dirs)},
+                "outputs": [out_reads],
+                "command": "python " + " ".join([Path(sys.argv[0]).name, *sys.argv[1:]]),
+                "extra": {"markers": markers, "file_action": "copy" if args.copy else "symlink"},
+            },
+        )
+    return rc
 
 
 if __name__ == "__main__":

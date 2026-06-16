@@ -1,80 +1,43 @@
 #!/usr/bin/env python3
 """
-07b_blast_verify.py
-===================
-BLAST-verify ambiguous or suspect taxa from a QIIME2 metabarcoding taxonomy
-table against a local or remote NCBI nt database.
+blast_verify.py
+===============
+Step: blast (optional `analyses.blast` stage; targeted verification after taxonomy)
 
-This script fills the gap between classifier-assigned taxonomy (which can
-misassign taxa with limited reference coverage) and a curated, clean diet
-table. Run it after 07_taxonomy_table.py and before 11_clean_diet_table.py
-when you have:
+Purpose:
+    BLAST-verify specific suspect or ambiguous taxa from the taxonomy count table
+    against a local NCBI nt (or remote) database, then compare the BLAST top hit
+    to the classifier's assignment and flag agreements vs disagreements. Use it to
+    confirm ecologically implausible IDs, pin down unresolved taxa, or check
+    candidate artefacts before trusting them. Complements blast_refine (fills in
+    under-resolved calls) and blast_qc (flags conflicts): this one answers
+    "is THIS specific call real?" for taxa you name or that clear a read threshold.
 
-  - Taxa that are ecologically unexpected (tropical species in New England)
-  - Unresolved taxa you want to pin down (Brevoortia sp. -> B. tyrannus?)
-  - Candidate artefacts to confirm before adding to the exclusion list
-  - Any taxon above a read-count threshold that deserves verification
+Target selection (at least one; from config or CLI):
+    --taxa       taxon-name substrings to verify (e.g. Brevoortia Lutjanidae)
+    --min-reads  verify every taxon with >= this many total reads
 
-ADAPT FOR YOUR STUDY:
-  The script is fully generic — it works for any marker (MiFish, cytb, 16S)
-  and any study system. The only thing to change is the --db path if your
-  HPC has a local nt database in a different location, and the taxon patterns
-  you pass via --taxa or --min-reads.
+Inputs:
+    --taxonomy  FeatureData[Taxonomy] .qza   (exported internally; from --marker)
+    --rep-seqs  FeatureData[Sequence] .qza   (exported internally; from --marker)
+    --counts    taxonomy count TSV (from taxonomy_table.py; derived from --marker)
+    --db        path to a local BLAST nt DB, no extension (from analyses.blast.db)
+    pipeline_config.yml  analyses.blast.verify (min_reads, identity, hits, evalue)
 
-Workflow
---------
-1. Parse the taxonomy count table to find ASV hashes for target taxa
-2. Pull sequences from the DADA2 rep-seqs FASTA
-3. Run BLASTn against local nt (or remote NCBI as fallback)
-4. Compare BLAST top hit to classifier assignment
-5. Write a verification report flagging agreements and disagreements
+Outputs (in --outdir, default results/<marker>/all/blast/):
+    blast_verify_<marker>.tsv             per-target BLAST top hits vs classifier
+    blast_verify_report_<marker>.txt      human-review report
+    logs/run_manifest.jsonl               run appended on completion
 
-Usage examples
---------------
-  # BLAST all taxa above 10,000 reads (catch high-abundance ambiguous taxa)
-  python scripts/08c_blast_verify.py \\
-      --taxonomy   qiime2/MiFish/all/taxonomy/taxonomy.qza \\
-      --rep-seqs   qiime2/MiFish/all/dada2/rep-seqs.qza \\
-      --counts     results/MiFish/all/taxonomy/taxonomy_counts_L7_MiFish.tsv \\
-      --marker     MiFish \\
-      --min-reads  10000 \\
-      --db         /path/to/nt \\
-      --outdir     results/MiFish/all/blast_verify/
+Usage:
+    python blast_verify.py --marker MiFish                    # min_reads from config
+    python blast_verify.py --marker cytb --taxa Brevoortia    # verify named taxa
+    python blast_verify.py --marker MiFish --remote           # NCBI remote BLAST
 
-  # BLAST specific suspect taxa by name substring
-  python scripts/08c_blast_verify.py \\
-      --taxonomy   qiime2/MiFish/all/taxonomy/taxonomy.qza \\
-      --rep-seqs   qiime2/MiFish/all/dada2/rep-seqs.qza \\
-      --counts     results/MiFish/all/taxonomy/taxonomy_counts_L7_MiFish.tsv \\
-      --marker     MiFish \\
-      --taxa       Brevoortia Lutjanidae Sprattus Trachinotus Esox \\
-      --db         /path/to/nt \\
-      --outdir     results/MiFish/all/blast_verify/
-
-  # Use remote NCBI if no local database available (slower)
-  python scripts/08c_blast_verify.py \\
-      --taxonomy   qiime2/cytb/all/taxonomy/taxonomy.qza \\
-      --rep-seqs   qiime2/cytb/all/dada2/rep-seqs.qza \\
-      --counts     results/cytb/all/taxonomy/notrim/taxonomy_counts_L7_cytb.tsv \\
-      --marker     cytb \\
-      --taxa       Mustelidae Cervidae \\
-      --remote \\
-      --outdir     results/cytb/all/blast_verify/
-
-Output files
-------------
-  blast_verify_{marker}.tsv       — full results table
-  blast_verify_{marker}_report.txt — human-readable summary
-  blast_query_{marker}.fasta      — sequences that were BLASTed (for records)
-
-Reading the report
-------------------
-  AGREE    : BLAST top hit matches classifier genus/family — assignment confirmed
-  DISAGREE : BLAST says something different — review and possibly add to artefact list
-  NO HIT   : No BLAST hit above threshold — low confidence, treat as unresolved
-  ARTEFACT : BLAST confirms a geographically impossible or ecologically implausible ID
+Requirements:
+    QIIME 2 (exports the .qza inputs) and BLAST+ (`blastn`). A local nt DB is
+    strongly preferred over --remote.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -87,6 +50,14 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+
+# --- make config_loader and the utils package importable regardless of cwd ---
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from config_loader import load_config, get_paths  # noqa: E402
+from utils import checkpoint, provenance, validate  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -510,75 +481,132 @@ def write_report(results: pd.DataFrame, report_path: Path, marker: str) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="08c_blast_verify.py",
+        prog="blast_verify.py",
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    req = p.add_argument_group("required arguments")
-    req.add_argument("--taxonomy",  required=True, type=Path,
-                     help="QIIME2 taxonomy.qza artifact")
-    req.add_argument("--rep-seqs",  required=True, type=Path,
-                     help="QIIME2 rep-seqs.qza artifact (DADA2 output)")
-    req.add_argument("--counts",    required=True, type=Path,
-                     help="Taxonomy counts TSV from 07_taxonomy_table.py")
+    req = p.add_argument_group("inputs (derived from --marker + config if omitted)")
     req.add_argument("--marker",    required=True,
-                     help="Marker name for output labeling (e.g. MiFish, cytb)")
-    req.add_argument("--outdir",    required=True, type=Path,
-                     help="Output directory for results")
+                     help="Marker name (e.g. MiFish, cytb). Drives derived paths and config.")
+    req.add_argument("--config",    default=None,
+                     help="Path to pipeline_config.yml.")
+    req.add_argument("--taxonomy",  default=None, type=Path,
+                     help="QIIME2 taxonomy .qza (exported internally). Derived if omitted.")
+    req.add_argument("--rep-seqs",  default=None, type=Path,
+                     help="QIIME2 rep-seqs .qza (DADA2 output). Derived if omitted.")
+    req.add_argument("--counts",    default=None, type=Path,
+                     help="Taxonomy count TSV from taxonomy_table.py. Derived if omitted.")
+    req.add_argument("--outdir",    default=None, type=Path,
+                     help="Output directory. Default: results/<marker>/all/blast/")
 
-    sel = p.add_argument_group("target selection (use one or both)")
+    sel = p.add_argument_group("target selection (one or both; default from config)")
     sel.add_argument("--taxa", nargs="+", default=None,
-                     help="Taxon name substrings to BLAST (e.g. Brevoortia Lutjanidae)")
+                     help="Taxon name substrings to BLAST (e.g. Brevoortia Lutjanidae).")
     sel.add_argument("--min-reads", type=int, default=None,
-                     help="BLAST all taxa with total reads >= this threshold")
+                     help="BLAST all taxa with total reads >= this threshold "
+                          "(default: analyses.blast.verify.min_reads).")
 
-    db_grp = p.add_argument_group("BLAST database (use one)")
+    db_grp = p.add_argument_group("BLAST database (--db from analyses.blast.db, or --remote)")
     db_grp.add_argument("--db", default=None,
-                         help="Path to local BLAST nt database (without extension). "
-                              "Path to local BLAST nt database (required unless --remote is set). Example: /path/to/nt")
+                         help="Path to local BLAST nt database (no extension). "
+                              "Default: analyses.blast.db from config.")
     db_grp.add_argument("--remote", action="store_true", default=False,
-                         help="Use remote NCBI BLAST instead of local database "
-                              "(slower; use if local db unavailable)")
+                         help="Use remote NCBI BLAST instead of a local database (slower).")
 
-    opt = p.add_argument_group("BLAST parameters")
-    opt.add_argument("--threads",       type=int,   default=8,
-                     help="CPU threads for local BLAST. Default: 8")
-    opt.add_argument("--max-hits",      type=int,   default=5,
-                     help="Maximum BLAST hits per query. Default: 5")
-    opt.add_argument("--perc-identity", type=float, default=85.0,
-                     help="Minimum percent identity for BLAST hits. Default: 85.0")
-    opt.add_argument("--evalue",        type=float, default=0.001,
-                     help="Maximum e-value for BLAST hits. Default: 0.001")
+    opt = p.add_argument_group("BLAST parameters (default from analyses.blast.verify)")
+    opt.add_argument("--threads",       type=int,   default=None,
+                     help="CPU threads for local BLAST. Default: blast.num_threads.")
+    opt.add_argument("--max-hits",      type=int,   default=None,
+                     help="Maximum BLAST hits per query. Default: 5 (config: verify.max_hits).")
+    opt.add_argument("--perc-identity", type=float, default=None,
+                     help="Minimum percent identity for BLAST hits. Default: 85 (config: verify.perc_identity).")
+    opt.add_argument("--evalue",        type=float, default=None,
+                     help="Maximum e-value for BLAST hits. Default: 0.001 (config: verify.evalue).")
     opt.add_argument("--dry-run", action="store_true",
-                     help="Export sequences and write FASTA but do not run BLAST")
+                     help="Export sequences and write FASTA but do not run BLAST.")
     return p
+
+
+def _derive_counts_tsv(paths, marker: str) -> Optional[Path]:
+    """
+    Find the taxonomy count TSV for a marker, picking the deepest taxonomic
+    level available (e.g. L7 over L6). Returns None if none exist yet.
+    """
+    import re
+    tax_dir = paths.engine_taxonomy_results_dir(marker, "all")
+    hits = sorted(tax_dir.glob(f"taxonomy_counts_L*_{marker}.tsv"))
+    if not hits:
+        return None
+    def _level(p: Path) -> int:
+        m = re.search(r"_L(\d+)_", p.name)
+        return int(m.group(1)) if m else 0
+    return max(hits, key=_level)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
 
+    cfg = load_config(args.config)
+    paths = get_paths(cfg)
+    bcfg = cfg.analyses.get("blast", {})
+    vcfg = bcfg.get("verify", {})       # tool-specific knobs for blast_verify
+    marker = args.marker
+
+    # Derive inputs/outputs from the marker + config when not given explicitly.
+    if args.taxonomy is None:
+        args.taxonomy = paths.engine_taxonomy_qza(marker, "all")
+    if args.rep_seqs is None:
+        args.rep_seqs = paths.engine_rep_seqs_qza(marker, "all")
+    if args.counts is None:
+        args.counts = _derive_counts_tsv(paths, marker)
+    if args.outdir is None:
+        args.outdir = paths.engine_blast_results_dir(marker, "all")
+    if args.db is None and not args.remote:
+        args.db = bcfg.get("db") or None
+    # Config fills unset knobs (CLI still wins).
+    if args.threads is None:
+        args.threads = bcfg.get("num_threads", 8)
+    if args.max_hits is None:
+        args.max_hits = vcfg.get("max_hits", 5)
+    if args.perc_identity is None:
+        args.perc_identity = vcfg.get("perc_identity", 85.0)
+    if args.evalue is None:
+        args.evalue = vcfg.get("evalue", 0.001)
+    if args.taxa is None and args.min_reads is None:
+        args.min_reads = vcfg.get("min_reads")        # config default target selection
+        args.taxa = vcfg.get("taxa")
+
     # Validate inputs
+    validate.require_qiime()
+    if args.counts is None:
+        log.error("No taxonomy count TSV found for %s — run the taxonomy stage "
+                  "first, or pass --counts.", marker)
+        return 2
     for path, name in [
         (args.taxonomy,  "--taxonomy"),
         (args.rep_seqs,  "--rep-seqs"),
         (args.counts,    "--counts"),
     ]:
-        if not path.exists():
+        if not Path(path).exists():
             log.error("%s not found: %s", name, path)
-            return 1
+            return 2
 
     if not args.taxa and not args.min_reads:
-        log.error("Specify at least one of --taxa or --min-reads")
-        return 1
+        log.error("No targets selected: set analyses.blast.verify.min_reads (or "
+                  ".taxa) in the config, or pass --taxa / --min-reads.")
+        return 2
 
-    if not args.remote and not Path(args.db + ".nal").exists() and \
-       not Path(args.db + ".nsi").exists():
+    if not args.remote and not args.db:
+        log.error("No BLAST database: set analyses.blast.db, pass --db, or use --remote.")
+        return 2
+
+    if not args.remote and args.db and \
+       not Path(str(args.db) + ".nal").exists() and \
+       not Path(str(args.db) + ".nsi").exists():
         log.warning("Local BLAST database not found at %s", args.db)
         log.warning("Use --remote for NCBI BLAST, or check --db path")
-        if not args.remote:
-            log.error("Cannot proceed without a valid database. "
-                      "Add --remote to use NCBI instead.")
-            return 1
+        log.error("Cannot proceed without a valid database. Add --remote to use NCBI instead.")
+        return 2
 
     args.outdir.mkdir(parents=True, exist_ok=True)
 
@@ -656,8 +684,30 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("=" * 60)
         print(f"\nFull report: {report_path}")
 
+        produced = [str(results_path), str(report_path)]
+
+    checkpoint.print_checkpoint(
+        cfg, "blast",
+        marker=marker,
+        produced=produced,
+        provenance={
+            "inputs": {"taxonomy": str(args.taxonomy), "rep_seqs": str(args.rep_seqs),
+                       "counts": str(args.counts),
+                       "blast_db": str(args.db) if args.db else None},
+            "outputs": produced,
+            "command": "python " + " ".join([Path(sys.argv[0]).name, *sys.argv[1:]]),
+            "extra": {"perc_identity": args.perc_identity, "max_hits": args.max_hits,
+                      "remote": bool(args.remote),
+                      "min_reads": args.min_reads,
+                      "taxa": args.taxa},
+        },
+    )
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        sys.exit(main())
+    except validate.ValidationError as e:
+        log.error("%s", e)
+        sys.exit(1)

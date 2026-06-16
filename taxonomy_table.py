@@ -1,87 +1,46 @@
 #!/usr/bin/env python3
 """
-07_taxonomy_table.py
-====================
-Export taxonomy classifications to human-readable TSV tables for any marker
-in the metabarcoding pipeline.
+taxonomy_table.py
+=================
+Step: taxonomy export (part of the taxonomy stage)
 
-Philosophy
-----------
-Diversity statistics (alpha/beta) are computed on a rarefied feature table
-that includes all reads — host DNA and all. This is correct for those metrics.
+Purpose:
+    Export QIIME 2 taxonomy classifications to human-readable TSV tables for any
+    marker, using the *correct* order of operations for composition barplots:
+    start from the UNRAREFIED table, apply marker-aware filters (remove host,
+    off-target kingdoms), collapse to genus/species, then compute relative
+    abundance among the remaining classified reads.
 
-Taxonomy barplots are different: rarefying a table dominated by host reads
-(e.g. loon gut 16S) before filtering means almost all subsampled reads are
-Unassigned, leaving only a handful of bacterial reads per sample. The result
-is barplots that are nearly empty — not a bug, but the wrong order of operations.
+    Why unrarefied: rarefying a host-dominated table (e.g. gut 16S) before
+    filtering leaves almost only Unassigned reads, producing near-empty barplots.
+    Diversity metrics still use the rarefied table; composition does not.
 
-This script takes the correct approach:
-  1. Start from the UNRAREFIED feature table.
-  2. Apply marker-aware filters (remove host, off-target kingdoms, etc.).
-  3. Collapse to genus (or specified level).
-  4. Compute relative abundance among the remaining classified reads.
-  5. Export: counts TSV, relative-abundance TSV, and top-N summary.
+Inputs:
+    --taxonomy  FeatureData[Taxonomy] .qza   (or derived from --marker via config)
+    --table     FeatureTable[Frequency] .qza (unrarefied; or derived from --marker)
+    --marker    marker gene (controls depth + auto-filter defaults)
+    pipeline_config.yml  active_markers, output locations
 
-The relative-abundance TSV is the direct input to barplot scripts.
-Methods note for manuscript: "Taxonomic composition was visualized using
-unrarefied relative abundance among [target]-assigned reads."
+Outputs (in --outdir, default results/<marker>/all/taxonomy/):
+    taxonomy_counts_L{N}_{marker}.tsv      collapsed count table
+    taxonomy_relabund_L{N}_{marker}.tsv    relative abundance (barplot input)
+    taxonomy_top{N}_L{N}_{marker}.tsv      top-N summary
+    logs/run_manifest.jsonl                run appended on completion
 
-Marker filter defaults (applied automatically unless --include/--exclude set):
-  Marker   Include          Exclude
-  -------  ---------------  -----------------------------------------
-  16S      (bacteria only)  mitochondria,chloroplast,Eukaryota,Archaea
-  18S      (all eukaryotes) Bacteria,Archaea
-  ITS      Fungi            Bacteria,Archaea
-  MiFish   Actinopteri      Bacteria,Archaea  (MitoFish QIIME DB uses QIIME prefixes)
-  cytb     Vertebrata       Bacteria,Viruses,Archaea
-  COI      Metazoa          Bacteria,Viruses,Archaea,Viridiplantae,Fungi
+Marker filter defaults (auto-applied unless --include/--exclude/--no-auto-filter):
+    16S    bacteria only      exclude mitochondria, chloroplast, Eukaryota, Archaea
+    18S    all eukaryotes     exclude Bacteria, Archaea
+    ITS    Fungi              exclude Bacteria, Archaea
+    MiFish Actinopteri        exclude Bacteria, Archaea
+    cytb   Vertebrata         exclude Bacteria, Viruses, Archaea
+    COI    Metazoa            exclude Bacteria, Viruses, Archaea, Viridiplantae, Fungi
 
-Outputs (all in --outdir):
-  taxonomy_counts_L{N}_{marker}.tsv     — collapsed count table
-  taxonomy_relabund_L{N}_{marker}.tsv   — relative abundance table (0–1)
-  taxonomy_top{N}_L{N}_{marker}.tsv     — top-N taxa by mean relative abundance
-  taxonomy_summary_{marker}.tsv         — per-ASV summary with parsed levels
+Usage:
+    python taxonomy_table.py --marker 16S
+    python taxonomy_table.py --marker 16S --taxonomy t.qza --table tbl.qza --outdir out/
 
-Usage examples:
-
-  # 16S — genus level, auto bacteria filter
-  python 07_taxonomy_table.py \\
-      --taxonomy  qiime2/taxonomy/taxonomy_16S_silva138.qza \\
-      --table     qiime2/dada2/table_16S_DvT.qza \\
-      --marker    16S \\
-      --outdir    results/16S/DvT/taxonomy/
-
-  # MiFish — species level, auto Vertebrata filter
-  python 07_taxonomy_table.py \\
-      --taxonomy  qiime2/MiFish/all/taxonomy/taxonomy.qza \\
-      --table     qiime2/MiFish/all/dada2/table_filtered.qza \\
-      --marker    MiFish \\
-      --outdir    results/MiFish/all/taxonomy/
-
-  # ITS — family level (override default genus), Fungi only
-  python 07_taxonomy_table.py \\
-      --taxonomy  qiime2/taxonomy/taxonomy_ITS.qza \\
-      --table     qiime2/dada2/table_ITS.qza \\
-      --marker    ITS \\
-      --level     5 \\
-      --outdir    results/ITS/all/taxonomy/
-
-  # Override auto-filters completely
-  python 07_taxonomy_table.py \\
-      --taxonomy  qiime2/taxonomy/taxonomy_COI.qza \\
-      --table     qiime2/dada2/table_COI.qza \\
-      --marker    COI \\
-      --include   Arthropoda \\
-      --exclude   Insecta \\
-      --outdir    results/COI/all/taxonomy/
-
-  # Dry run — see what would happen without writing files
-  python 07_taxonomy_table.py \\
-      --taxonomy  qiime2/taxonomy/taxonomy_16S_silva138.qza \\
-      --table     qiime2/dada2/table_16S_DvT.qza \\
-      --marker    16S \\
-      --outdir    results/16S/DvT/taxonomy/ \\
-      --dry-run
+Requirements:
+    Python >= 3.8, pandas, numpy. No QIIME 2 needed (reads .qza zips directly).
 """
 
 from __future__ import annotations
@@ -98,6 +57,14 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+
+# --- make config_loader and the utils package importable regardless of cwd ---
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from config_loader import load_config, get_paths            # noqa: E402
+from utils import checkpoint, provenance                    # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -204,21 +171,8 @@ MARKER_FILTER_DEFAULTS: Dict[str, Dict[str, Optional[str]]] = {
 # QZA loading helpers
 # ---------------------------------------------------------------------------
 
-def load_taxonomy_qza(qza_path: Path) -> pd.DataFrame:
-    """
-    Read a FeatureData[Taxonomy] QZA directly (no qiime CLI needed).
-    Returns DataFrame with columns: Feature ID, Taxon, Confidence.
-    """
-    with zipfile.ZipFile(qza_path, "r") as zf:
-        tax_name = next(
-            (n for n in zf.namelist() if n.endswith("taxonomy.tsv")), None
-        )
-        if tax_name is None:
-            log.error("No taxonomy.tsv found inside %s", qza_path)
-            sys.exit(1)
-        with zf.open(tax_name) as fh:
-            df = pd.read_csv(fh, sep="\t", dtype=str)
-
+def _normalize_taxonomy_columns(df: pd.DataFrame, source_name: str) -> pd.DataFrame:
+    """Standardize columns to Feature ID / Taxon / Confidence."""
     df.columns = df.columns.str.strip()
     col_map: Dict[str, str] = {}
     for c in df.columns:
@@ -234,8 +188,41 @@ def load_taxonomy_qza(qza_path: Path) -> pd.DataFrame:
         df = df.rename(columns={df.columns[0]: "Feature ID"})
     if "Taxon" not in df.columns and len(df.columns) > 1:
         df = df.rename(columns={df.columns[1]: "Taxon"})
-    log.info("  Taxonomy: %d features from %s", len(df), qza_path.name)
+    log.info("  Taxonomy: %d features from %s", len(df), source_name)
     return df
+
+
+def load_taxonomy_qza(qza_path: Path) -> pd.DataFrame:
+    """
+    Read a FeatureData[Taxonomy] QZA directly (no qiime CLI needed).
+    Returns DataFrame with columns: Feature ID, Taxon, Confidence.
+    """
+    with zipfile.ZipFile(qza_path, "r") as zf:
+        tax_name = next(
+            (n for n in zf.namelist() if n.endswith("taxonomy.tsv")), None
+        )
+        if tax_name is None:
+            log.error("No taxonomy.tsv found inside %s", qza_path)
+            sys.exit(1)
+        with zf.open(tax_name) as fh:
+            df = pd.read_csv(fh, sep="\t", dtype=str)
+    return _normalize_taxonomy_columns(df, qza_path.name)
+
+
+def load_taxonomy_tsv(tsv_path: Path) -> pd.DataFrame:
+    """
+    Read an exported / BLAST-refined taxonomy TSV (Feature ID, Taxon, Confidence).
+    Returns DataFrame with the same normalized columns as load_taxonomy_qza.
+    """
+    df = pd.read_csv(tsv_path, sep="\t", dtype=str)
+    return _normalize_taxonomy_columns(df, tsv_path.name)
+
+
+def load_taxonomy_source(path: Path) -> pd.DataFrame:
+    """Dispatch to the QZA or TSV loader based on file suffix."""
+    if str(path).endswith(".qza"):
+        return load_taxonomy_qza(path)
+    return load_taxonomy_tsv(path)
 
 
 def load_feature_table_qza(qza_path: Path) -> pd.DataFrame:
@@ -636,7 +623,7 @@ Build and write taxonomy summary TSVs from QIIME2 taxonomy and feature table QZA
 
     # ── 2. Load ───────────────────────────────────────────────────────────
     log.info("Loading data...")
-    tax_df = load_taxonomy_qza(taxonomy_qza)
+    tax_df = load_taxonomy_source(taxonomy_qza)
     table  = load_feature_table_qza(table_qza)
 
     # Align — drop features not in both
@@ -732,7 +719,7 @@ Build and return the argument parser for 07_taxonomy_table.py.
     See module docstring for full rationale and usage examples.
     """
     p = argparse.ArgumentParser(
-        prog="07_taxonomy_table.py",
+        prog="taxonomy_table.py",
         description=(
             "Export QIIME 2 taxonomy to TSV tables for barplotting.\n"
             "Uses unrarefied counts + marker-aware filters + relative abundance.\n"
@@ -740,14 +727,15 @@ Build and return the argument parser for 07_taxonomy_table.py.
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--taxonomy", required=True, type=Path,
-                   help="FeatureData[Taxonomy] QZA.")
-    p.add_argument("--table", required=True, type=Path,
-                   help="FeatureTable[Frequency] QZA (unrarefied recommended).")
+    p.add_argument("--taxonomy", default=None, type=Path,
+                   help="FeatureData[Taxonomy] QZA. Derived from --marker if omitted.")
+    p.add_argument("--table", default=None, type=Path,
+                   help="FeatureTable[Frequency] QZA (unrarefied). Derived from --marker if omitted.")
     p.add_argument("--marker", required=True, choices=list(MARKER_CONFIG.keys()),
                    help="Marker gene — controls taxonomy depth and auto-filter defaults.")
-    p.add_argument("--outdir", default="taxonomy_tables", type=Path,
-                   help="Output directory. Default: ./taxonomy_tables")
+    p.add_argument("--config", default=None, help="Path to pipeline_config.yml.")
+    p.add_argument("--outdir", default=None, type=Path,
+                   help="Output directory. Default: results/<marker>/all/taxonomy/ from config.")
     p.add_argument("--level", type=int, default=None,
                    help=(
                        "Taxonomic level to collapse to (1=Kingdom, N=Species). "
@@ -786,23 +774,143 @@ Build and return the argument parser for 07_taxonomy_table.py.
     return p
 
 
-def main() -> int:
+def _resolve_taxonomy_source(paths, cfg, marker: str, explicit: Optional[Path]):
     """
-Parse arguments and run build_taxonomy_tables for the requested marker.
+    Decide which taxonomy feeds the count tables (pipeline option b).
 
-    Validates that the taxonomy and feature table QZAs exist, resolves marker
-    aliases, merges any command-line include/exclude overrides with marker
-    defaults, and calls build_taxonomy_tables. Returns 0 on success, 2 if
-    required input files are missing, 1 on any other error.
+    An explicit --taxonomy always wins. Otherwise, if BLAST is enabled in the
+    config and a refined taxonomy exists for this marker, prefer it; else use the
+    classifier output. Returns (taxonomy_path, kind, classifier_path, refined_path)
+    where kind is 'explicit' | 'refined' | 'classifier'.
+    """
+    classifier = paths.engine_taxonomy_qza(marker, "all")
+    refined = paths.engine_blast_results_dir(marker, "all") / f"refined_taxonomy_{marker}.tsv"
+    refined_exists = refined.exists()
+    if explicit is not None:
+        return explicit, "explicit", classifier, (refined if refined_exists else None)
+    blast_enabled = cfg.analyses.get("blast", {}).get("enabled", False)
+    if blast_enabled and refined_exists:
+        return refined, "refined", classifier, refined
+    if refined_exists and not blast_enabled:
+        log.warning("A BLAST-refined taxonomy exists (%s) but analyses.blast.enabled "
+                    "is false — using the classifier taxonomy. Enable BLAST to use it.",
+                    refined)
+    return classifier, "classifier", classifier, (refined if refined_exists else None)
+
+
+def _write_taxonomy_provenance(outdir: Path, marker: str, kind: str,
+                               classifier_path: Path, refined_path: Optional[Path],
+                               cfg, dry_run: bool) -> None:
+    """
+    Write TAXONOMY_SOURCE_<marker>.md next to the count tables so it is always
+    obvious — to anyone, months later — whether the downstream data and stats
+    rest on raw classifier output or BLAST-refined taxonomy.
+    """
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    commit = provenance.git_commit(cfg) or "(not a git checkout)"
+    out = outdir / f"TAXONOMY_SOURCE_{marker}.md"
+
+    lines = [f"# Taxonomy provenance — {marker}", "",
+             f"- Written: {now}", f"- Pipeline commit: `{commit}`", ""]
+
+    if kind == "refined":
+        # Count how many ASVs the refinement actually changed.
+        n_total = n_changed = None
+        try:
+            clf = load_taxonomy_source(classifier_path).set_index("Feature ID")["Taxon"]
+            ref = load_taxonomy_source(refined_path).set_index("Feature ID")["Taxon"]
+            joined = clf.to_frame("clf").join(ref.to_frame("ref"), how="outer")
+            n_total = len(joined)
+            n_changed = int((joined["clf"].fillna("") != joined["ref"].fillna("")).sum())
+        except Exception as e:  # documentation must never crash the run
+            log.warning("Could not diff classifier vs refined taxonomy: %s", e)
+        bcfg = cfg.analyses.get("blast", {})
+        try:
+            mtime = datetime.fromtimestamp(
+                Path(refined_path).stat().st_mtime, timezone.utc
+            ).strftime("%Y-%m-%d %H:%M UTC")
+        except OSError:
+            mtime = "(unknown)"
+        lines += [
+            "## Source: BLAST-REFINED taxonomy", "",
+            "> **These count tables — and everything downstream that reads them",
+            "> (presence/absence, diversity, figures, stats) — are built on",
+            "> BLAST-refined taxonomy, not the raw classifier output.**", "",
+            f"- Refined taxonomy used: `{refined_path}`",
+            f"- Refined file generated: {mtime}",
+            f"- Classifier taxonomy (superseded): `{classifier_path}`",
+        ]
+        if n_total is not None:
+            lines.append(f"- ASVs changed by refinement: **{n_changed} of {n_total}**")
+        lines += [
+            "", "### BLAST settings (from `analyses.blast`)",
+            f"- db: `{bcfg.get('db', '')}`",
+            f"- target_rank: {bcfg.get('target_rank', 'genus')}",
+            f"- min_pident: {bcfg.get('min_pident', '')}",
+            f"- max_target_seqs: {bcfg.get('max_target_seqs', '')}",
+            f"- apply: {bcfg.get('apply', False)}",
+            "", "### To fall back to the classifier taxonomy",
+            "Set `analyses.blast.enabled: false` (or remove the refined file) and",
+            "re-run the taxonomy stage. The count tables will be rebuilt from the",
+            "classifier output and this note will update accordingly.",
+        ]
+    elif kind == "explicit":
+        lines += ["## Source: explicit --taxonomy override", "",
+                  f"- Taxonomy used: `{classifier_path}` (passed on the command line)"]
+    else:
+        lines += ["## Source: classifier taxonomy", "",
+                  f"- Taxonomy used: `{classifier_path}`",
+                  "- No BLAST refinement was applied to these tables."]
+        if refined_path is not None:
+            lines.append(f"- Note: a refined taxonomy exists at `{refined_path}` but "
+                         "BLAST is disabled, so it was not used.")
+
+    text = "\n".join(lines) + "\n"
+    if dry_run:
+        log.info("[dry-run] would write taxonomy provenance: %s", out)
+        return
+    out.write_text(text)
+    log.info("Taxonomy provenance written: %s", out)
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    """
+    Parse arguments and run build_taxonomy_tables for the requested marker.
+
+    Resolves the taxonomy/table/outdir from --marker via config when not given,
+    validates the input QZAs exist, merges any include/exclude overrides with the
+    marker defaults, builds the tables, then records the run. Returns 0 on
+    success, 2 if required inputs are missing.
     """
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    if not args.taxonomy.exists():
-        log.error("Taxonomy QZA not found: %s", args.taxonomy)
+    cfg = load_config(args.config)
+    paths = get_paths(cfg)
+
+    # Derive inputs/outputs from the marker when not given explicitly.
+    # Taxonomy source follows pipeline option (b): prefer a BLAST-refined
+    # taxonomy when BLAST is enabled and one exists, else the classifier output.
+    taxonomy, tax_source, classifier_path, refined_path = _resolve_taxonomy_source(
+        paths, cfg, args.marker, args.taxonomy)
+    table    = args.table or paths.engine_table_qza(args.marker, "all", nocontrols=True)
+    outdir   = args.outdir or paths.engine_taxonomy_results_dir(args.marker, "all")
+
+    if tax_source == "refined":
+        log.warning("=" * 64)
+        log.warning("Using BLAST-REFINED taxonomy for %s:", args.marker)
+        log.warning("  %s", taxonomy)
+        log.warning("Downstream count tables, diversity, and figures will be built")
+        log.warning("on refined assignments. See TAXONOMY_SOURCE_%s.md in the output.",
+                    args.marker)
+        log.warning("=" * 64)
+
+    if not taxonomy.exists():
+        log.error("Taxonomy not found: %s", taxonomy)
         return 2
-    if not args.table.exists():
-        log.error("Feature table QZA not found: %s", args.table)
+    if not table.exists():
+        log.error("Feature table QZA not found: %s", table)
         return 2
 
     include = [s.strip() for s in args.include.split(",") if s.strip()] \
@@ -810,22 +918,20 @@ Parse arguments and run build_taxonomy_tables for the requested marker.
     exclude = [s.strip() for s in args.exclude.split(",") if s.strip()] \
         if args.exclude else []
 
-    # --no-auto-filter: pass sentinel values so auto-defaults are skipped
     if args.no_auto_filter:
-        # We signal "user explicitly wants no filter" by setting include/exclude
-        # to a non-empty sentinel that won't match anything meaningful, then
-        # just skip the auto-apply block.  Simplest: set a flag on the marker.
         log.info("--no-auto-filter: marker-specific defaults disabled.")
-        # Monkey-patch: temporarily empty the defaults for this marker
         MARKER_FILTER_DEFAULTS[args.marker] = {"include": None, "exclude": None}
 
-    args.outdir.mkdir(parents=True, exist_ok=True)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    _write_taxonomy_provenance(outdir, args.marker, tax_source,
+                               classifier_path, refined_path, cfg, args.dry_run)
 
     build_taxonomy_tables(
-        taxonomy_qza      = args.taxonomy,
-        table_qza         = args.table,
+        taxonomy_qza      = taxonomy,
+        table_qza         = table,
         marker            = args.marker,
-        outdir            = args.outdir,
+        outdir            = outdir,
         level             = args.level,
         top_n             = args.top_n,
         include           = include,
@@ -835,18 +941,20 @@ Parse arguments and run build_taxonomy_tables for the requested marker.
         dry_run           = args.dry_run,
     )
 
-    log.info("=== Done ===")
-    log.info(
-        "\nNext step — generate barplots with 10_plot_taxonomy.py:\n"
-        "  python 10_plot_taxonomy.py \\\n"
-        "    --relabund  %s/taxonomy_relabund_L*_%s.tsv \\\n"
-        "    --metadata  metadata/qiime/metadata_%s.tsv \\\n"
-        "    --group-by  Group \\\n"
-        "    --marker    %s \\\n"
-        "    --palette   purple \\\n"
-        "    --outdir    %s/../figures/taxonomy/",
-        str(args.outdir), args.marker, args.marker, args.marker, str(args.outdir),
-    )
+    if not args.dry_run:
+        produced = sorted(str(p) for p in outdir.glob(f"taxonomy_*_{args.marker}.tsv"))
+        checkpoint.print_checkpoint(
+            cfg, "taxonomy",
+            marker=args.marker,
+            produced=produced,
+            provenance={
+                "inputs": {"taxonomy": taxonomy, "table": table},
+                "outputs": produced,
+                "command": "python " + " ".join([Path(sys.argv[0]).name, *sys.argv[1:]]),
+                "extra": {"level": args.level, "top_n": args.top_n,
+                          "taxonomy_source": tax_source},
+            },
+        )
     return 0
 
 

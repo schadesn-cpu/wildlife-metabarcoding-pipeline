@@ -1,92 +1,47 @@
 #!/usr/bin/env python3
 """
-07c_blast_qc_unclassified.py
-=============================
-BLAST-based QC for poorly-classified ASVs from QIIME2 metabarcoding pipelines.
+blast_qc.py
+===========
+Step: blast (optional `analyses.blast` stage; QC pass after taxonomy)
 
-Identifies ASVs that the classifier could not resolve below a specified
-taxonomic rank (default: class), extracts their sequences, runs BLASTn
-against a local or remote NCBI nt database, resolves taxids to species
-names via NCBI E-utilities, and generates a flagged report for manual
-review before cleaning (11_clean_diet_table.py).
+Purpose:
+    BLAST-based QC for poorly-classified ASVs. Finds ASVs the classifier could
+    not resolve below a target rank (or below a confidence floor), BLASTs them
+    against a local NCBI nt (or custom) database, and flags CONFLICTS — cases
+    where the BLAST hit points at a host / contaminant / off-target taxon that
+    was miscalled as diet (e.g. host DNA classed as fish in MiFish/cytb). The
+    complement of blast_refine (07d): that one fills in under-resolved calls;
+    this one catches wrong ones. Emits a human-review report plus a
+    confirmed-artefacts list for the downstream cleaning step.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PIPELINE POSITION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    The conflict taxa list (host genus, contaminants, known off-targets) is
+    study-specific and comes from analyses.blast.qc.conflict_taxa — adapt it to
+    your system rather than relying on built-in defaults.
 
-  dada2/rep-seqs.qza  ──┐
-  taxonomy/taxonomy.qza ─┼──► 07c_blast_qc_unclassified.py
-                         │         ↓
-                    blast_qc_report_{marker}.txt   ← human review
-                    confirmed_artefacts_{marker}.txt ← pass to 09b
-                         ↓
-                  11_clean_diet_table.py  (--exclude-asvs flag)
-                         ↓
-                  downstream figures / diversity
+Network:
+    Resolving BLAST taxids to species names uses NCBI E-utilities (efetch,
+    xtract on PATH) -> needs internet. This is NON-FATAL: if the tools are absent
+    or the network is down, the report still lists taxids, just without names.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-WHY THIS EXISTS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Inputs:
+    --taxonomy  exported taxonomy TSV (Feature ID, Taxon, Confidence; from --marker)
+    --rep-seqs  exported rep-seqs FASTA (dna-sequences.fasta; from --marker)
+    --blast-db  path to a local BLAST nt/custom DB (from analyses.blast.db)
+    pipeline_config.yml  analyses.blast.qc (rank, thresholds, conflict_taxa)
 
-  Short-amplicon classifiers (MiFish 12S ~170bp, cytb ~300bp) sometimes
-  assign host DNA or environmental bacteria to broad fish classes (e.g.
-  'Actinopteri Unclassified') when the reference database lacks a close
-  match. String-based host filters in 09b_ cannot catch these because the
-  taxonomy string gives no indication of the true identity.
+Outputs (in --outdir, default results/<marker>/all/blast/):
+    blast_qc_report_<marker>.txt          human-review report
+    confirmed_artefacts_<marker>.txt      ASV IDs confirmed as artefacts
+    logs/run_manifest.jsonl               run appended on completion
 
-  This script catches those cases by directly BLASTing residual
-  unclassified ASVs against nt, so misclassified host reads (e.g. Gavia
-  immer miscalled as Actinopteri) and bacterial off-targets are identified
-  before they inflate diversity metrics or appear in barplots.
+Usage:
+    python blast_qc.py --marker MiFish                  # local DB from config
+    python blast_qc.py --marker MiFish --remote          # NCBI remote BLAST
+    python blast_qc.py --marker cytb --skip-blast        # just list unresolved
 
-  ADAPT FOR YOUR STUDY:
-  - Change --target-rank to match the level you expect classification
-    to stop at for your marker (default: class for MiFish/cytb)
-  - Change --min-confidence to match your classifier threshold
-  - Change --conflict-taxa to the host taxa expected in your study
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-USAGE EXAMPLES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  # MiFish — local nt database
-  python scripts/07c_blast_qc_unclassified.py \\
-      --taxonomy  qiime2/MiFish/all/taxonomy-exported/taxonomy.tsv \\
-      --rep-seqs  qiime2/MiFish/all/rep-seqs-exported/dna-sequences.fasta \\
-      --marker    MiFish \\
-      --blast-db  /path/to/nt \\
-      --outdir    qiime2/MiFish/all/blast_qc/
-
-  # cytb — local nt database, stricter confidence threshold
-  python scripts/07c_blast_qc_unclassified.py \\
-      --taxonomy  qiime2/cytb/all/taxonomy-exported/taxonomy.tsv \\
-      --rep-seqs  qiime2/cytb/all/rep-seqs-exported/dna-sequences.fasta \\
-      --marker    cytb \\
-      --blast-db  /path/to/nt \\
-      --min-confidence 0.80 \\
-      --outdir    qiime2/cytb/all/blast_qc/
-
-  # Remote BLAST (no local nt database — slower)
-  python scripts/07c_blast_qc_unclassified.py \\
-      --taxonomy  qiime2/MiFish/all/taxonomy-exported/taxonomy.tsv \\
-      --rep-seqs  qiime2/MiFish/all/rep-seqs-exported/dna-sequences.fasta \\
-      --marker    MiFish \\
-      --remote \\
-      --outdir    qiime2/MiFish/all/blast_qc/
-
-  # Dry run — just show which ASVs would be BLASTed
-  python scripts/07c_blast_qc_unclassified.py \\
-      --taxonomy  qiime2/MiFish/all/taxonomy-exported/taxonomy.tsv \\
-      --rep-seqs  qiime2/MiFish/all/rep-seqs-exported/dna-sequences.fasta \\
-      --marker    MiFish \\
-      --blast-db  /path/to/nt \\
-      --outdir    qiime2/MiFish/all/blast_qc/ \\
-      --dry-run
-
-Dependencies:
-  - BLAST+ (blastn must be on PATH)
-  - NCBI E-utilities (efetch, xtract must be on PATH for taxid resolution)
-  - pip install pandas
+Requirements:
+    QIIME 2 (to export inputs), BLAST+ (`blastn`), and -- for taxid names --
+    NCBI E-utilities. A local nt DB is strongly preferred over --remote.
 """
 from __future__ import annotations
 
@@ -101,6 +56,14 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 import pandas as pd
+
+# --- make config_loader and the utils package importable regardless of cwd ---
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from config_loader import load_config, get_paths  # noqa: E402
+from utils import checkpoint, provenance, validate  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -129,15 +92,15 @@ RANK_PREFIXES = {
 # Taxa that signal a conflict with expected marker targets
 # ADAPT: change these to match your study organism and marker
 # ---------------------------------------------------------------------------
+# Fallback conflict taxa used only if analyses.blast.qc.conflict_taxa is empty.
+# Kept GENERIC: bacteria/contaminants are off-target in any dietary metabarcoding
+# study. Study-specific host genera and known off-targets belong in the config
+# (analyses.blast.qc.conflict_taxa) so this stays reusable across systems.
 CONFLICT_TAXA_DEFAULT = [
-    # Loon host (Gaviiformes)
-    "Gavia", "Gaviidae", "Gaviiformes", "Gaviimorphae",
     # Bacteria — should not appear in dietary metabarcoding
     "Bacteria", "Proteobacteria", "Firmicutes", "Enterobacteriaceae",
     "Rahnella", "Enterococcus", "Escherichia", "uncultured bacterium",
     "Cetobacterium",
-    # Raptors / off-target birds (cytb known issue)
-    "Buteo", "Haliaeetus", "Aquila", "Accipitridae",
 ]
 
 
@@ -577,72 +540,107 @@ def write_report(
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="07c_blast_qc_unclassified.py",
+        prog="blast_qc.py",
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    req = p.add_argument_group("required")
-    req.add_argument("--taxonomy",  required=True, type=Path,
-                     help="Exported QIIME2 taxonomy TSV (Feature ID, Taxon, Confidence)")
-    req.add_argument("--rep-seqs",  required=True, type=Path,
-                     help="Exported QIIME2 rep-seqs FASTA (dna-sequences.fasta)")
+    req = p.add_argument_group("inputs (derived from --marker + config if omitted)")
     req.add_argument("--marker",    required=True,
-                     help="Marker name for output labeling (e.g. MiFish, cytb)")
-    req.add_argument("--outdir",    required=True, type=Path,
-                     help="Output directory for FASTA, BLAST results, and report")
+                     help="Marker name (e.g. MiFish, cytb). Drives derived paths and config.")
+    req.add_argument("--config",    default=None,
+                     help="Path to pipeline_config.yml.")
+    req.add_argument("--taxonomy",  default=None, type=Path,
+                     help="Exported taxonomy TSV (Feature ID, Taxon, Confidence). Derived if omitted.")
+    req.add_argument("--rep-seqs",  default=None, type=Path,
+                     help="Exported rep-seqs FASTA (dna-sequences.fasta). Derived if omitted.")
+    req.add_argument("--outdir",    default=None, type=Path,
+                     help="Output directory. Default: results/<marker>/all/blast/")
 
-    blast = p.add_argument_group("BLAST options (one of --blast-db or --remote required)")
+    blast = p.add_argument_group("BLAST options (--blast-db from analyses.blast.db, or --remote)")
     blast.add_argument("--blast-db", default=None,
-                       help="Path to local BLAST nt database (e.g. /share/databases/ncbi_nt/nt)")
+                       help="Path to local BLAST nt database. Default: analyses.blast.db.")
     blast.add_argument("--remote",   action="store_true", default=False,
-                       help="Use NCBI remote BLAST instead of local database (slower)")
-    blast.add_argument("--num-threads", type=int, default=4,
-                       help="BLAST threads (local only). Default: 4")
-    blast.add_argument("--max-target-seqs", type=int, default=5,
-                       help="Max BLAST hits per ASV. Default: 5")
-    blast.add_argument("--min-pident", type=float, default=95.0,
-                       help="Minimum BLAST identity (%%) to call a conflict. Default: 95.0")
+                       help="Use NCBI remote BLAST instead of a local database (slower).")
+    blast.add_argument("--num-threads", type=int, default=None,
+                       help="BLAST threads (local only). Default: 4 (config: blast.num_threads).")
+    blast.add_argument("--max-target-seqs", type=int, default=None,
+                       help="Max BLAST hits per ASV. Default: 5 (config: qc.max_target_seqs).")
+    blast.add_argument("--min-pident", type=float, default=None,
+                       help="Minimum BLAST identity (%%) to call a conflict. Default: 95 (config: qc.min_pident).")
 
-    filt = p.add_argument_group("filter options")
-    filt.add_argument("--target-rank",    default="order",
-                      choices=RANK_ORDER,
-                      help="ASVs not classified to this rank are BLASTed. Default: order")
-    filt.add_argument("--min-confidence", type=float, default=0.80,
-                      help="ASVs below this classifier confidence are BLASTed. Default: 0.80")
+    filt = p.add_argument_group("filter options (default from analyses.blast.qc)")
+    filt.add_argument("--target-rank",    default=None, choices=RANK_ORDER,
+                      help="ASVs not classified to this rank are BLASTed. Default: order.")
+    filt.add_argument("--min-confidence", type=float, default=None,
+                      help="ASVs below this classifier confidence are BLASTed. Default: 0.80.")
     filt.add_argument("--conflict-taxa",  nargs="+", default=None,
-                      help="Species/genus names that signal a conflict with target taxa. "
-                           "Default: loon (Gavia), bacteria, raptors. "
-                           "ADAPT for your study organism.")
-    filt.add_argument("--max-asvs",       type=int, default=200,
-                      help="Maximum ASVs to BLAST (safety limit). Default: 200")
+                      help="Taxa that signal a conflict (host/contaminant/off-target). "
+                           "Default: analyses.blast.qc.conflict_taxa from config.")
+    filt.add_argument("--max-asvs",       type=int, default=None,
+                      help="Maximum ASVs to BLAST (safety limit). Default: 200 (config: qc.max_asvs).")
 
     util = p.add_argument_group("utility")
     util.add_argument("--skip-blast", action="store_true", default=False,
-                      help="Skip BLAST step — just identify and report unresolved ASVs")
+                      help="Skip BLAST step — just identify and report unresolved ASVs.")
     util.add_argument("--dry-run",    action="store_true", default=False,
-                      help="Print planned actions without running BLAST or writing files")
+                      help="Print planned actions without running BLAST or writing files.")
     return p
 
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
 
+    cfg = load_config(args.config)
+    paths = get_paths(cfg)
+    bcfg = cfg.analyses.get("blast", {})
+    qcfg = bcfg.get("qc", {})           # tool-specific knobs for blast_qc
+    marker = args.marker
+
+    # Derive inputs/outputs from the marker + config when not given explicitly.
+    if args.taxonomy is None:
+        args.taxonomy = paths.engine_taxonomy_exported_tsv(marker, "all")
+    if args.rep_seqs is None:
+        args.rep_seqs = paths.engine_rep_seqs_exported_fasta(marker, "all")
+    if args.outdir is None:
+        args.outdir = paths.engine_blast_results_dir(marker, "all")
+    if args.blast_db is None and not args.remote:
+        args.blast_db = bcfg.get("db") or None
+    # Config fills unset knobs (CLI still wins): db/num_threads shared (top-level),
+    # the rest from analyses.blast.qc.
+    if args.num_threads is None:
+        args.num_threads = bcfg.get("num_threads", 4)
+    if args.min_pident is None:
+        args.min_pident = qcfg.get("min_pident", 95.0)
+    if args.max_target_seqs is None:
+        args.max_target_seqs = qcfg.get("max_target_seqs", 5)
+    if args.target_rank is None:
+        args.target_rank = qcfg.get("target_rank", "order")
+    if args.min_confidence is None:
+        args.min_confidence = qcfg.get("min_confidence", 0.80)
+    if args.max_asvs is None:
+        args.max_asvs = qcfg.get("max_asvs", 200)
+
     # ── Validate inputs ───────────────────────────────────────────────────
+    validate.require_qiime()
     for path, name in [(args.taxonomy, "--taxonomy"),
                        (args.rep_seqs, "--rep_seqs")]:
         if not path.exists():
-            log.error("%s not found: %s", name, path)
+            log.error("%s not found: %s — export it (qiime tools export) or run "
+                      "the taxonomy stage first.", name, path)
             return 2
 
     if not args.remote and not args.blast_db and not args.skip_blast:
-        log.error("Provide --blast-db (local) or --remote, or use --skip-blast")
+        log.error("No BLAST database: set analyses.blast.db, or pass --blast-db / "
+                  "--remote, or use --skip-blast.")
         return 2
 
     if args.blast_db and not Path(args.blast_db).parent.exists():
         log.error("BLAST database path not found: %s", args.blast_db)
         return 2
 
-    conflict_taxa = args.conflict_taxa or CONFLICT_TAXA_DEFAULT
+    # Conflict taxa: config-driven (study-specific host/contaminants); the
+    # built-in default is a generic contaminant fallback only.
+    conflict_taxa = args.conflict_taxa or qcfg.get("conflict_taxa") or CONFLICT_TAXA_DEFAULT
 
     # ── Load taxonomy ─────────────────────────────────────────────────────
     log.info("Loading taxonomy: %s", args.taxonomy)
@@ -753,6 +751,7 @@ def main(argv=None) -> int:
             log.warning("BLAST failed or produced no output — report will lack BLAST data")
 
     # ── Write report ──────────────────────────────────────────────────────
+    args.outdir.mkdir(parents=True, exist_ok=True)
     report_path, artefacts_path = write_report(
         unresolved_df  = unresolved,
         blast_df       = blast_df,
@@ -770,15 +769,36 @@ def main(argv=None) -> int:
         log.info("")
         log.info("Next steps:")
         log.info("  1. Review %s", report_path)
-        log.info("  2. Add confirmed ASV IDs to ARTEFACT_SPECIES in "
-                 "scripts/11_clean_diet_table.py")
-        log.info("  3. Filter QIIME2 feature table using %s", artefacts_path)
+        log.info("  2. Add confirmed ASV IDs to your exclusion / cleaning list")
+        log.info("  3. Filter the QIIME2 feature table to drop those ASVs")
         log.info("  4. Rerun core-metrics and regenerate diversity figures")
     else:
         log.info("No confirmed artefacts found — no action needed")
+
+    if not args.dry_run:
+        produced = [str(report_path)] + ([str(artefacts_path)] if artefacts_path else [])
+        checkpoint.print_checkpoint(
+            cfg, "blast",
+            marker=marker,
+            produced=produced,
+            provenance={
+                "inputs": {"taxonomy": str(args.taxonomy), "rep_seqs": str(args.rep_seqs),
+                           "blast_db": str(args.blast_db) if args.blast_db else None},
+                "outputs": produced,
+                "command": "python " + " ".join([Path(sys.argv[0]).name, *sys.argv[1:]]),
+                "extra": {"target_rank": args.target_rank,
+                          "min_confidence": args.min_confidence,
+                          "remote": bool(args.remote),
+                          "n_conflict_taxa": len(conflict_taxa)},
+            },
+        )
 
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        sys.exit(main())
+    except validate.ValidationError as e:
+        log.error("%s", e)
+        sys.exit(1)

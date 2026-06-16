@@ -1,93 +1,42 @@
 #!/usr/bin/env python3
 """
-06_rarefaction.py
-=================
-Standalone rarefaction curve generator for QIIME 2 feature tables.
+rarefaction.py
+==============
+Step: rarefaction (optional `analyses.rarefaction` stage; runs before diversity)
 
-Run this BEFORE committing to a sampling depth in the main pipeline.
-It generates an alpha-rarefaction QZV (viewable at view.qiime2.org) and
-a static PNG figure with guidance annotations to help you choose a threshold.
+Purpose:
+    Generate QIIME 2 alpha-rarefaction curves and a static depth-selection
+    figure so you can choose a sampling depth BEFORE committing to it in the
+    diversity stage. Produces an interactive .qzv (view.qiime2.org) plus an
+    annotated .png and a per-sample read-count TSV.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-HOW TO CHOOSE A RAREFACTION DEPTH — what to look for
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+How to choose a depth (kept from the original — genuinely useful):
+    A rarefaction curve plots alpha diversity vs sequencing depth; good data
+    rises then plateaus. Pick the depth where most samples' curves flatten,
+    balanced against sample retention — any sample below the depth is dropped
+    from downstream analyses. A common starting point is the 10th percentile of
+    per-sample read counts (keeps ~90% of samples), confirmed by eyeballing the
+    curves. Watch for uneven dropout across groups, which biases comparisons.
 
-A rarefaction (subsampling) curve plots alpha diversity (e.g., observed
-features, Faith's PD, Shannon entropy) against sequencing depth. Good
-sequencing produces curves that rise steeply then flatten — indicating
-that additional reads do not discover new diversity.
+Inputs:
+    --table     FeatureTable[Frequency] .qza   (or derived from --marker)
+    --metadata  QIIME 2 metadata .tsv          (or derived from --marker)
+    --tree      rooted tree .qza for Faith's PD (optional; --no-tree to skip)
+    pipeline_config.yml  analyses.rarefaction (max_depth, steps, iterations)
 
-STEP 1 — Find the plateau ("knee point")
-  Look for the depth at which most samples' curves level off and become
-  approximately horizontal. This is where you have captured the true
-  diversity of the community and more reads add little information.
-
-STEP 2 — Balance depth vs. sample retention
-  Any sample with fewer reads than the chosen depth is DROPPED from all
-  downstream analyses. You must decide how many samples you can afford
-  to lose:
-    • Losing 0–1 samples: generally acceptable if they are low-quality
-    • Losing >20% of samples: reconsider lowering the depth
-    • Losing samples unevenly across groups: a serious bias risk
-
-  A common rule of thumb is to choose the depth at the 10th percentile
-  of sample read counts (keeping ~90% of samples), provided curves have
-  plateaued by that point.
-
-STEP 3 — Check that curves have plateaued at your chosen depth
-  If curves are still rising steeply at the chosen depth, your diversity
-  estimates will be artificially low. Consider deeper sequencing or
-  acknowledge this limitation.
-
-STEP 4 — Consistency across groups
-  Look at curves colored by your grouping variable. If one group
-  consistently has lower sequencing depth than the other, a high
-  threshold could disproportionately drop samples from that group.
-
-GOOD DEPTH: curves plateau well before it, ≥80–90% of samples retained,
-            both groups represented evenly.
-BAD DEPTH:  curves still rising at that depth, or >20% of samples lost.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Outputs (in --outdir, default results/<marker>/all/rarefaction/):
+    alpha_rarefaction[_<marker>].qzv     interactive curve
+    rarefaction_summary[_<marker>].png   annotated depth-selection figure
+    rarefaction_depth_report[_<marker>].tsv  per-sample counts + retention
+    logs/run_manifest.jsonl              run appended on completion
 
 Usage:
-  # Basic (requires rooted tree for Faith's PD)
-  python 04_rarefaction.py \\
-      --table    qiime2/dada2/table_16S.qza \\
-      --tree     qiime2/diversity/rooted-tree_16S.qza \\
-      --metadata metadata/qiime/metadata_16S.tsv \\
-      --max-depth 20000 \\
-      --outdir   results/rarefaction/
+    python rarefaction.py --marker 16S
+    python rarefaction.py --marker 16S --candidate-depth 8000
+    python rarefaction.py --table t.qza --metadata m.tsv --no-tree --outdir out/
 
-  # With group coloring and candidate depth marked
-  python 04_rarefaction.py \\
-      --table        qiime2/dada2/table_16S.qza \\
-      --tree         qiime2/diversity/rooted-tree_16S.qza \\
-      --metadata     metadata/qiime/metadata_16S.tsv \\
-      --max-depth    20000 \\
-      --candidate-depth 8000 \\
-      --group-column Group \\
-      --marker       16S \\
-      --outdir       results/rarefaction/
-
-  # Without tree (skips Faith's PD)
-  python 04_rarefaction.py \\
-      --table    qiime2/dada2/table_16S.qza \\
-      --metadata metadata/qiime/metadata_16S.tsv \\
-      --max-depth 20000 \\
-      --no-tree \\
-      --outdir   results/rarefaction/
-
-Dependencies:
-  Python stdlib only for core logic; matplotlib + numpy for static figure.
-  QIIME 2 conda environment must be active (provides qiime CLI).
-
-  pip install matplotlib numpy   (or conda install -c conda-forge matplotlib numpy)
-
-Outputs:
-  <outdir>/alpha_rarefaction_<marker>.qzv   — Interactive QIIME viz
-  <outdir>/rarefaction_summary_<marker>.png — Static annotated figure
-  <outdir>/rarefaction_depth_report_<marker>.tsv — Per-sample read counts + drop status
+Requirements:
+    QIIME 2 (provides the `qiime` CLI), matplotlib for the figure.
 """
 
 from __future__ import annotations
@@ -103,6 +52,14 @@ import sys
 import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+# --- make config_loader and the utils package importable regardless of cwd ---
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from config_loader import load_config, get_paths, get_metadata_path  # noqa: E402
+from utils import checkpoint, provenance, validate                   # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -400,8 +357,8 @@ def make_rarefaction_figure(
 # Main
 # ---------------------------------------------------------------------------
 
-def parse_args() -> argparse.Namespace:
-    """Build and parse the argument parser for 04_rarefaction.py."""
+def parse_args(argv=None) -> argparse.Namespace:
+    """Build and parse the argument parser for rarefaction.py."""
     p = argparse.ArgumentParser(
         description=(
             "Generate QIIME 2 alpha-rarefaction curves and a static depth-selection figure.\n\n"
@@ -412,9 +369,11 @@ def parse_args() -> argparse.Namespace:
         epilog=__doc__,
     )
 
-    req = p.add_argument_group("required arguments")
-    req.add_argument("--table",    required=True, type=Path, help="Feature table QZA.")
-    req.add_argument("--metadata", required=True, type=Path, help="QIIME 2 metadata TSV.")
+    req = p.add_argument_group("inputs (derived from --marker if omitted)")
+    req.add_argument("--marker",    default="", help="Marker name (e.g. 16S). Drives derived paths and config.")
+    req.add_argument("--config",    default=None, help="Path to pipeline_config.yml.")
+    req.add_argument("--table",    default=None, type=Path, help="Feature table QZA. Derived from --marker if omitted.")
+    req.add_argument("--metadata", default=None, type=Path, help="QIIME 2 metadata TSV. Derived from --marker if omitted.")
 
     tree = p.add_argument_group("tree arguments")
     tree.add_argument("--tree",    default=None, type=Path,
@@ -423,79 +382,99 @@ def parse_args() -> argparse.Namespace:
     tree.add_argument("--no-tree", action="store_true",
                       help="Skip Faith's PD (no rooted tree available).")
 
-    opt = p.add_argument_group("options")
-    opt.add_argument("--max-depth",       type=int, default=20000,
-                     help="Maximum rarefaction depth for the curve. Default: 20000.")
-    opt.add_argument("--steps",           type=int, default=20,
-                     help="Number of depth steps in rarefaction curve. Default: 20.")
-    opt.add_argument("--iterations",      type=int, default=10,
-                     help="Rarefaction iterations per step. Default: 10.")
+    opt = p.add_argument_group("options (default to analyses.rarefaction in config)")
+    opt.add_argument("--max-depth",       type=int, default=None,
+                     help="Maximum rarefaction depth for the curve.")
+    opt.add_argument("--steps",           type=int, default=None,
+                     help="Number of depth steps in rarefaction curve.")
+    opt.add_argument("--iterations",      type=int, default=None,
+                     help="Rarefaction iterations per step.")
     opt.add_argument("--candidate-depth", type=int, default=None,
                      help="Candidate sampling depth to evaluate and mark on the figure.")
     opt.add_argument("--group-column",    default=None,
                      help="Metadata column to color samples by in the QZV (optional).")
-    opt.add_argument("--marker",          default="",
-                     help="Marker name for output file naming (e.g., 16S).")
-    opt.add_argument("--outdir",          type=Path, default=Path("results/rarefaction"),
-                     help="Output directory. Default: results/rarefaction/")
+    opt.add_argument("--outdir",          type=Path, default=None,
+                     help="Output directory. Default: results/<marker>/all/rarefaction/")
     opt.add_argument("--dry-run",         action="store_true",
                      help="Print commands without executing.")
 
-    return p.parse_args()
+    return p.parse_args(argv)
 
 
-def main() -> int:
+def main(argv=None) -> int:
     """
-Parse arguments and run the rarefaction curve analysis.
+    Parse arguments and run the rarefaction curve analysis.
 
-    Generates a QIIME2 alpha-rarefaction QZV (viewable at view.qiime2.org)
-    and a static PNG depth-selection figure annotated with retention
-    statistics at the candidate depth. Returns 0 on success, 1 on error.
+    Resolves the table/metadata/tree/outdir and curve parameters from --marker
+    and config when not given explicitly, validates inputs, generates the
+    alpha-rarefaction QZV + depth-selection figure + per-sample TSV, then
+    records the run. Returns 0 on success, 1 on error.
     """
-    args = parse_args()
+    args = parse_args(argv)
 
-    which_or_die("qiime")
+    cfg = load_config(args.config)
+    paths = get_paths(cfg)
+    rcfg = cfg.analyses.get("rarefaction", {})
+    marker = args.marker
 
-    table = args.table.resolve()
-    metadata = args.metadata.resolve()
+    # Derive inputs/outputs from the marker when not given explicitly.
+    if not marker and (args.table is None or args.metadata is None):
+        log.error("Provide --marker (to derive paths) or both --table and --metadata.")
+        return 1
+    table = (args.table or paths.engine_table_qza(marker, "all", nocontrols=True)).resolve()
+    metadata = (args.metadata
+                or get_metadata_path(cfg, marker, "all")).resolve()
+    outdir = args.outdir or paths.engine_rarefaction_results_dir(marker, "all")
+
+    # Curve parameters: CLI overrides config, config overrides built-in defaults.
+    max_depth  = args.max_depth  if args.max_depth  is not None else rcfg.get("max_depth", 20000)
+    steps      = args.steps      if args.steps      is not None else rcfg.get("steps", 20)
+    iterations = args.iterations if args.iterations is not None else rcfg.get("iterations", 10)
+    candidate  = (args.candidate_depth if args.candidate_depth is not None
+                  else cfg.markers.get(marker, {}).get("rarefaction_depth") or None)
+
+    validate.require_qiime()
     require_exists(table, "Feature table")
     require_exists(metadata, "Metadata file")
 
-    if not args.no_tree:
-        if args.tree is None:
-            log.error(
-                "No --tree provided. Provide a rooted tree QZA for Faith's PD, "
-                "or pass --no-tree to skip phylogenetic metrics."
-            )
-            return 1
+    # Tree: explicit --tree wins; else for phylo markers try the engine's rooted
+    # tree; otherwise fall back to no-tree (skip Faith's PD) with a loud note.
+    if args.no_tree:
+        tree = None
+    elif args.tree is not None:
         tree = args.tree.resolve()
         require_exists(tree, "Rooted tree")
     else:
-        tree = None
+        candidate_tree = paths.rooted_tree_qza(marker) if marker else None
+        if candidate_tree and candidate_tree.exists():
+            tree = candidate_tree
+        else:
+            log.warning("No rooted tree found for %s — skipping Faith's PD "
+                        "(pass --tree to include it).", marker or "(no marker)")
+            tree = None
 
-    args.outdir.mkdir(parents=True, exist_ok=True)
-    suffix = f"_{args.marker}" if args.marker else ""
+    outdir.mkdir(parents=True, exist_ok=True)
+    suffix = f"_{marker}" if marker else ""
 
-    # ── Step 1: Get per-sample read counts and print report ───────────────
+    # ── Step 1: per-sample read counts + report ──────────────────────────────
     log.info("Extracting per-sample read counts...")
     counts = get_sample_read_counts(table, args.dry_run)
-    _, stats = recommend_depth(counts, args.candidate_depth)
-    print_depth_report(counts, stats, args.candidate_depth)
+    _, stats = recommend_depth(counts, candidate)
+    print_depth_report(counts, stats, candidate)
 
-    # Write depth TSV
-    depth_tsv = args.outdir / f"rarefaction_depth_report{suffix}.tsv"
+    depth_tsv = outdir / f"rarefaction_depth_report{suffix}.tsv"
     if not args.dry_run and counts:
-        write_depth_tsv(counts, args.candidate_depth, depth_tsv)
+        write_depth_tsv(counts, candidate, depth_tsv)
 
-    # ── Step 2: Run alpha-rarefaction ─────────────────────────────────────
-    qzv_out = args.outdir / f"alpha_rarefaction{suffix}.qzv"
+    # ── Step 2: alpha-rarefaction QZV ────────────────────────────────────────
+    qzv_out = outdir / f"alpha_rarefaction{suffix}.qzv"
     cmd = [
         "qiime", "diversity", "alpha-rarefaction",
         "--i-table", str(table),
         "--m-metadata-file", str(metadata),
-        "--p-max-depth", str(args.max_depth),
-        "--p-steps", str(args.steps),
-        "--p-iterations", str(args.iterations),
+        "--p-max-depth", str(max_depth),
+        "--p-steps", str(steps),
+        "--p-iterations", str(iterations),
         "--o-visualization", str(qzv_out),
     ]
     if tree is not None:
@@ -503,31 +482,35 @@ Parse arguments and run the rarefaction curve analysis.
 
     run_cmd(cmd, dry_run=args.dry_run)
 
-    # ── Step 3: Static annotated figure ──────────────────────────────────
-    fig_out = args.outdir / f"rarefaction_summary{suffix}.png"
+    # ── Step 3: static annotated figure ──────────────────────────────────────
+    fig_out = outdir / f"rarefaction_summary{suffix}.png"
     if not args.dry_run:
-        make_rarefaction_figure(counts, stats, args.candidate_depth, args.marker or "Unknown", fig_out)
+        make_rarefaction_figure(counts, stats, candidate, marker or "Unknown", fig_out)
 
-    # ── Summary ───────────────────────────────────────────────────────────
-    print("\n── Outputs ─────────────────────────────────────────────────────────")
-    print(f"  Interactive QZV:  {qzv_out}")
-    print(f"    → Open at: https://view.qiime2.org")
-    print(f"  Static figure:    {fig_out}")
-    print(f"  Depth report TSV: {depth_tsv}")
-    if counts and "p10_reads" in stats:
-        print(f"\n  Suggested starting depth: {stats['p10_reads']:,} reads")
-        print(f"  (10th percentile — retains ~90% of samples)")
-        print(f"  Confirm by inspecting curves in the QZV before proceeding.\n")
-
-    print(
-        "Next step — run diversity analysis with 03_run_full_metabarcoding_pipeline.py:\n"
-        "  python 03_run_full_metabarcoding_pipeline.py diversity \\\n"
-        "    --project-dir . \\\n"
-        "    --marker <MARKER> \\\n"
-        "    --rarefaction-depth <CHOSEN_DEPTH>"
-    )
+    if not args.dry_run:
+        produced = [str(p) for p in (qzv_out, fig_out, depth_tsv) if p.exists()]
+        checkpoint.print_checkpoint(
+            cfg, "rarefaction",
+            marker=marker or None,
+            produced=produced,
+            provenance={
+                "inputs": {"table": table, "metadata": metadata, "tree": tree},
+                "outputs": produced,
+                "command": "python " + " ".join([Path(sys.argv[0]).name, *sys.argv[1:]]),
+                "extra": {"max_depth": max_depth, "candidate_depth": candidate,
+                          "p10_reads": stats.get("p10_reads")},
+            },
+        )
+        if counts and "p10_reads" in stats:
+            log.info("Suggested starting depth: %s reads (10th percentile, ~90%% retained). "
+                     "Confirm against the curves before setting the diversity depth.",
+                     f"{stats['p10_reads']:,}")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except validate.ValidationError as exc:
+        log.error("%s", exc)
+        sys.exit(1)
