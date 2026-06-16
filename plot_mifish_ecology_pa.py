@@ -2,21 +2,27 @@
 """
 plot_mifish_ecology_pa.py
 =========================
-Two-panel stacked detection frequency figure for MiFish presence/absence data.
+Two-panel grouped-bar detection-frequency figure for MiFish presence/absence
+data.
 
 Panel A: Detection frequency by ecological season
-Panel B: Detection frequency by COD group
+Panel B: Detection frequency by cause of death
 
-Each bar = proportion of samples in that group where each common_group category
-was detected (at least one species from that category). Bars colored by
-common_group using the Wong 2011 colorblind-safe palette.
+Each bar = proportion of samples in that grouping level where at least one
+species from a given common_group prey category was detected. Because a
+single loon can be positive for multiple prey categories simultaneously
+(marine forage fish AND freshwater prey fish, etc.), these per-category
+proportions are NOT mutually exclusive and therefore cannot be stacked.
+Bars are grouped side-by-side within each season / COD level.
+
+Bars colored by common_group using the Wong 2011 colorblind-safe palette.
 
 Usage:
-    python plot_mifish_ecology_pa.py \
-        --pa       results/MiFish/all/presence_absence/presence_absence_MiFish.tsv \
-        --annot    results/MiFish/all/taxonomy_annotated/annotation_table.tsv \
-        --meta     metadata/qiime/metadata_MiFish.tsv \
-        --cod-meta metadata/qiime/metadata_MiFish_cod.tsv \
+    python plot_mifish_ecology_pa.py \\
+        --pa       results/MiFish/all/presence_absence/presence_absence_MiFish.tsv \\
+        --annot    results/MiFish/all/taxonomy_annotated/annotation_table.tsv \\
+        --meta     metadata/qiime/metadata_MiFish.tsv \\
+        --cod-meta metadata/qiime/metadata_MiFish_cod.tsv \\
         --outdir   results/MiFish/all/figures/ecology_pa/
 """
 
@@ -28,6 +34,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.ticker
 import numpy as np
 import pandas as pd
 
@@ -49,7 +56,7 @@ WONG = [
     "#999999",  # grey
 ]
 
-# Preferred group order and color assignment
+# Preferred prey-category order. Colors assigned positionally from WONG.
 GROUP_ORDER = [
     "Marine bottom fish",
     "Marine forage fish",
@@ -63,32 +70,19 @@ GROUP_ORDER = [
 ]
 GROUP_COLORS = {g: WONG[i % len(WONG)] for i, g in enumerate(GROUP_ORDER)}
 
-# Strip colors for the group-identity bar drawn below the x-axis
-SEASON_STRIP_COLORS = {
-    "Breeding":               "#0072B2",  # wong blue
-    "Freshwater_Nonbreeding": "#E69F00",  # wong orange
-    "Saltwater":              "#009E73",  # wong green
-}
-
-COD_STRIP_COLORS = {
-    "Lead":                  "#0072B2",  # wong blue  (Diseased subset)
-    "Parasitic_Infectious":  "#CC79A7",  # wong purple (Diseased subset)
-    "Trauma":                "#E69F00",  # wong orange
-    "Marine":                "#009E73",  # wong green
-}
-
 
 def detection_freq_by_group(pa: pd.DataFrame,
-                             annot: pd.DataFrame,
-                             grouping: pd.Series,
-                             group_order: list) -> pd.DataFrame:
+                            annot: pd.DataFrame,
+                            grouping: pd.Series,
+                            group_order: list) -> pd.DataFrame:
     """
     For each grouping level and each common_group category, compute the
-    proportion of samples where at least one species from that category
+    proportion of samples in which at least one species from that category
     was detected.
 
-    Returns DataFrame: rows = common_group, cols = grouping levels.
-    Values = detection frequency (0-1).
+    Returns DataFrame: rows = common_group (GROUP_ORDER), cols = grouping levels.
+    Values are independent per category (NOT mutually exclusive) and will
+    exceed 1.0 if summed across categories.
     """
     results = {}
     for grp in group_order:
@@ -101,13 +95,11 @@ def detection_freq_by_group(pa: pd.DataFrame,
         pa_sub = pa[grp_samples]
         freqs = {}
         for cat in GROUP_ORDER:
-            # Taxa belonging to this common_group
             taxa_in_cat = annot[annot["common_group"] == cat].index.tolist()
             taxa_present = [t for t in taxa_in_cat if t in pa_sub.index]
             if not taxa_present:
                 freqs[cat] = 0.0
             else:
-                # Detection = at least one taxon in category detected in sample
                 detected = pa_sub.loc[taxa_present].sum(axis=0) > 0
                 freqs[cat] = detected.mean()
         results[grp] = pd.Series(freqs)
@@ -115,66 +107,65 @@ def detection_freq_by_group(pa: pd.DataFrame,
     return pd.DataFrame(results)
 
 
-def make_stacked_bar(ax, freq_df: pd.DataFrame,
-                     title: str, n_per_group: dict,
-                     strip_colors: dict = None) -> None:
+def make_grouped_bar(ax, freq_df: pd.DataFrame,
+                     title: str, n_per_group: dict) -> list:
     """
-    Draw stacked horizontal bar chart.
-    freq_df: rows = common_group categories, cols = grouping levels.
-    strip_colors: optional dict mapping group name → color for the
-                  identity strip drawn below the x-axis.
+    Draw grouped (side-by-side) bar chart.
+
+    freq_df:  rows = prey categories, cols = grouping levels.
+    Each prey category gets its own colored bar within each grouping level.
+    Y-axis is detection frequency (%) capped at 0-105.
+
+    Returns a list of legend handles (one per plotted category).
     """
     groups = freq_df.columns.tolist()
     categories = [g for g in GROUP_ORDER if freq_df.loc[g].sum() > 0]
 
-    x = np.arange(len(groups))
-    bar_width = 0.55
+    if not categories:
+        ax.text(0.5, 0.5, "No detections",
+                transform=ax.transAxes, ha="center", va="center",
+                fontsize=12, color="#666666")
+        ax.set_title(title, fontsize=11, fontweight="bold", loc="left", pad=8)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for sp in ax.spines.values():
+            sp.set_visible(False)
+        return []
 
-    bottoms = np.zeros(len(groups))
+    n_groups = len(groups)
+    n_cats   = len(categories)
+
+    cluster_width = 0.85
+    bar_width = cluster_width / n_cats
+    x = np.arange(n_groups)
+
     handles = []
-    for cat in categories:
-        vals = freq_df.loc[cat].values.astype(float)
-        bars = ax.bar(x, vals * 100, bar_width,
-                      bottom=bottoms,
-                      color=GROUP_COLORS[cat],
-                      label=cat,
-                      edgecolor="white", linewidth=0.5)
-        bottoms += vals * 100
+    for i, cat in enumerate(categories):
+        offsets = x + (i - (n_cats - 1) / 2) * bar_width
+        vals = freq_df.loc[cat].values.astype(float) * 100
+        ax.bar(offsets, vals, bar_width,
+               color=GROUP_COLORS[cat], label=cat,
+               edgecolor="white", linewidth=0.5, zorder=3)
         handles.append(mpatches.Patch(color=GROUP_COLORS[cat], label=cat))
 
-    # ── Group identity strip below x-axis ────────────────────────────────────
-    STRIP_H   = 4.5   # height in data-% units
-    STRIP_GAP = 2.0   # gap between strip top and the zero line
-    if strip_colors:
-        for i, grp in enumerate(groups):
-            color = strip_colors.get(grp, "#999999")
-            ax.bar(i, STRIP_H, bar_width,
-                   bottom=-(STRIP_H + STRIP_GAP),
-                   color=color, clip_on=False, zorder=3,
-                   edgecolor="white", linewidth=0.5)
-        ax.set_ylim(-(STRIP_H + STRIP_GAP + 0.5), 105)
-        # Keep the spine anchored at y=0 so it doesn't drop into the strip
-        ax.spines["bottom"].set_position(("data", 0))
-    else:
-        ax.set_ylim(0, 105)
-
-    # X-axis labels with n
+    ax.set_ylim(0, 105)
     labels = [f"{g}\n(n={n_per_group.get(g, 0)})" for g in groups]
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=9)
     ax.set_ylabel("Detection frequency (%)", fontsize=10)
     ax.yaxis.set_major_formatter(
-        matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:.0f}%" if v >= 0 else "")
+        matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:.0f}%")
     )
     ax.spines[["top", "right"]].set_visible(False)
     ax.grid(axis="y", linestyle="--", linewidth=0.4, alpha=0.5, zorder=0)
-    ax.set_title(title, fontsize=11, fontweight="bold", pad=8)
+    ax.set_title(title, fontsize=11, fontweight="bold", loc="left", pad=8)
 
     return handles
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--pa",       required=True)
     parser.add_argument("--annot",    required=True)
     parser.add_argument("--meta",     required=True)
@@ -201,76 +192,77 @@ def main():
     samples = pa.columns.tolist()
 
     # ── Season grouping ───────────────────────────────────────────────────────
-    season_col = "Season"
-    season = meta.loc[meta.index.isin(samples), season_col].dropna()
-    season = season[season != ""]
+    season_col   = "Season"
+    season       = meta.loc[meta.index.isin(samples), season_col].dropna()
+    season       = season[season != ""]
     season_order = ["Breeding", "Freshwater_Nonbreeding", "Saltwater"]
-    season_n = season.value_counts().to_dict()
-
+    season_n     = season.value_counts().to_dict()
     log.info("Season breakdown: %s", season_n)
 
     # ── COD grouping ──────────────────────────────────────────────────────────
     cod_col = "COD_broad"
-    # Combine main metadata Group (for Marine) with COD metadata
-    cod = cod_meta.loc[cod_meta.index.isin(samples), cod_col] if cod_col in cod_meta.columns else pd.Series()
-    # Fill in Marine from Group column
+    cod = (cod_meta.loc[cod_meta.index.isin(samples), cod_col]
+           if cod_col in cod_meta.columns else pd.Series(dtype=str))
     group = meta.loc[meta.index.isin(samples), "Group"]
     cod_combined = cod.copy()
     for s in samples:
         if s not in cod_combined.index or pd.isna(cod_combined.get(s, None)):
             if group.get(s) == "Marine":
                 cod_combined[s] = "Marine"
-    # Order by prevalence, keeping meaningful groups
-    cod_order_pref = ["Lead", "Parasitic_Infectious", "Trauma", "Marine"]
-    cod_order = [g for g in cod_order_pref if g in cod_combined.values]
-    cod_n = cod_combined.value_counts().to_dict()
 
+    cod_order_pref = ["Lead", "Parasitic_Infectious", "Trauma", "Marine"]
+    cod_order      = [g for g in cod_order_pref if g in cod_combined.values]
+    cod_n          = cod_combined.value_counts().to_dict()
     log.info("COD breakdown: %s", cod_n)
 
     # ── Compute detection frequencies ────────────────────────────────────────
     log.info("Computing detection frequencies...")
-    season_freq = detection_freq_by_group(pa, annot, season, season_order)
+    season_freq = detection_freq_by_group(pa, annot, season,       season_order)
     cod_freq    = detection_freq_by_group(pa, annot, cod_combined, cod_order)
 
     # ── Plot ──────────────────────────────────────────────────────────────────
-    fig, axes = plt.subplots(1, 2, figsize=(13, 6))
-    plt.subplots_adjust(wspace=0.35)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5.5))
+    plt.subplots_adjust(wspace=0.28)
 
-    handles_a = make_stacked_bar(
-        axes[0], season_freq,
-        "A   Detection frequency by ecological season",
-        season_n,
-        strip_colors=SEASON_STRIP_COLORS)
+    make_grouped_bar(axes[0], season_freq,
+                     "A   Detection frequency by ecological season",
+                     season_n)
+    make_grouped_bar(axes[1], cod_freq,
+                     "B   Detection frequency by cause of death",
+                     cod_n)
 
-    handles_b = make_stacked_bar(
-        axes[1], cod_freq,
-        "B   Detection frequency by cause of death",
-        cod_n,
-        strip_colors=COD_STRIP_COLORS)
+    # Shared legend — union of categories seen across both panels, GROUP_ORDER sorted
+    seen = set()
+    union_cats = []
+    for cat in GROUP_ORDER:
+        has_data = ((cat in season_freq.index and season_freq.loc[cat].sum() > 0) or
+                    (cat in cod_freq.index    and cod_freq.loc[cat].sum() > 0))
+        if has_data and cat not in seen:
+            union_cats.append(cat)
+            seen.add(cat)
+    union_handles = [mpatches.Patch(color=GROUP_COLORS[c], label=c) for c in union_cats]
 
-    # Shared legend — use handles from whichever panel has more categories
-    all_handles = handles_a if len(handles_a) >= len(handles_b) else handles_b
     fig.legend(
-        handles=all_handles,
+        handles=union_handles,
         title="Prey category",
         title_fontsize=9,
         fontsize=8.5,
         loc="lower center",
-        ncol=3,
-        bbox_to_anchor=(0.5, -0.12),
+        ncol=min(len(union_handles), 5),
+        bbox_to_anchor=(0.5, -0.10),
         framealpha=0.9,
     )
 
     fig.suptitle(
         "MiFish 12S \u2014 Dietary detection frequency by ecological group\n"
-        "(classified prey only, \u2265500 reads/sample, \u22651% relative abundance)",
-        fontsize=11, y=1.02
+        "(presence/absence, \u2265500 reads/sample, \u22651% relative abundance)",
+        fontsize=11, y=1.02,
     )
 
     # ── Save ──────────────────────────────────────────────────────────────────
     for ext in ("png", "svg"):
         out = outdir / f"MiFish_ecology_pa_detection.{ext}"
-        fig.savefig(out, dpi=180, bbox_inches="tight")
+        fig.savefig(out, dpi=300, bbox_inches="tight", facecolor="white")
         log.info("Saved: %s", out)
 
     plt.close(fig)
@@ -278,5 +270,4 @@ def main():
 
 
 if __name__ == "__main__":
-    import matplotlib.ticker
     main()

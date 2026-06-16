@@ -66,7 +66,12 @@ CATEGORY_ORDER = [
     "Sand lance",
     "Freshwater prey fish",
     "Freshwater predators",
-    "Unclassified prey",
+    # "Unclassified prey" intentionally excluded — cytb reference database
+    # does not resolve many sequences below class level, so this bucket
+    # absorbed ~100% of detections in every season and obscured the real
+    # habitat signature. Report in Methods as a known limitation of the
+    # current cytb reference; revisit after targeted NE-coastal-fish
+    # reference rebuild.
 ]
 
 # Simplified display labels for lay audiences
