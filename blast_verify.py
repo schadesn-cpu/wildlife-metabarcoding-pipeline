@@ -43,6 +43,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -340,10 +341,10 @@ def parse_blast_results(
             pident = ""
             evalue_val = ""
         else:
-            r = blast_row.iloc[0]
-            blast_hit = str(r["stitle"])[:80]
-            pident = r["pident"]
-            evalue_val = r["evalue"]
+            best_hit = blast_row.iloc[0]
+            blast_hit = str(best_hit["stitle"])[:80]
+            pident = best_hit["pident"]
+            evalue_val = best_hit["evalue"]
 
             # Compare classifier to BLAST at genus level
             classifier_genus = _extract_genus(classifier_taxon)
@@ -480,51 +481,57 @@ def write_report(results: pd.DataFrame, report_path: Path, marker: str) -> None:
 # ---------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         prog="blast_verify.py",
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    req = p.add_argument_group("inputs (derived from --marker + config if omitted)")
-    req.add_argument("--marker",    required=True,
+    inputs_grp = parser.add_argument_group("inputs (derived from --marker + config if omitted)")
+    inputs_grp.add_argument("--marker",    required=True,
                      help="Marker name (e.g. MiFish, cytb). Drives derived paths and config.")
-    req.add_argument("--config",    default=None,
+    inputs_grp.add_argument("--config",    default=None,
                      help="Path to pipeline_config.yml.")
-    req.add_argument("--taxonomy",  default=None, type=Path,
+    inputs_grp.add_argument("--taxonomy",  default=None, type=Path,
                      help="QIIME2 taxonomy .qza (exported internally). Derived if omitted.")
-    req.add_argument("--rep-seqs",  default=None, type=Path,
+    inputs_grp.add_argument("--rep-seqs",  default=None, type=Path,
                      help="QIIME2 rep-seqs .qza (DADA2 output). Derived if omitted.")
-    req.add_argument("--counts",    default=None, type=Path,
+    inputs_grp.add_argument("--counts",    default=None, type=Path,
                      help="Taxonomy count TSV from taxonomy_table.py. Derived if omitted.")
-    req.add_argument("--outdir",    default=None, type=Path,
+    inputs_grp.add_argument("--outdir",    default=None, type=Path,
                      help="Output directory. Default: results/<marker>/all/blast/")
 
-    sel = p.add_argument_group("target selection (one or both; default from config)")
-    sel.add_argument("--taxa", nargs="+", default=None,
+    select_grp = parser.add_argument_group("target selection (one or both; default from config)")
+    select_grp.add_argument("--taxa", nargs="+", default=None,
                      help="Taxon name substrings to BLAST (e.g. Brevoortia Lutjanidae).")
-    sel.add_argument("--min-reads", type=int, default=None,
+    select_grp.add_argument("--min-reads", type=int, default=None,
                      help="BLAST all taxa with total reads >= this threshold "
                           "(default: analyses.blast.verify.min_reads).")
 
-    db_grp = p.add_argument_group("BLAST database (--db from analyses.blast.db, or --remote)")
+    db_grp = parser.add_argument_group("BLAST database (--db from analyses.blast.db, or --remote)")
     db_grp.add_argument("--db", default=None,
                          help="Path to local BLAST nt database (no extension). "
                               "Default: analyses.blast.db from config.")
     db_grp.add_argument("--remote", action="store_true", default=False,
                          help="Use remote NCBI BLAST instead of a local database (slower).")
 
-    opt = p.add_argument_group("BLAST parameters (default from analyses.blast.verify)")
-    opt.add_argument("--threads",       type=int,   default=None,
+    params_grp = parser.add_argument_group("BLAST parameters (default from analyses.blast.verify)")
+    params_grp.add_argument("--threads",       type=int,   default=None,
                      help="CPU threads for local BLAST. Default: blast.num_threads.")
-    opt.add_argument("--max-hits",      type=int,   default=None,
+    params_grp.add_argument("--max-hits",      type=int,   default=None,
                      help="Maximum BLAST hits per query. Default: 5 (config: verify.max_hits).")
-    opt.add_argument("--perc-identity", type=float, default=None,
+    params_grp.add_argument("--perc-identity", type=float, default=None,
                      help="Minimum percent identity for BLAST hits. Default: 85 (config: verify.perc_identity).")
-    opt.add_argument("--evalue",        type=float, default=None,
+    params_grp.add_argument("--evalue",        type=float, default=None,
                      help="Maximum e-value for BLAST hits. Default: 0.001 (config: verify.evalue).")
-    opt.add_argument("--dry-run", action="store_true",
+    params_grp.add_argument("--dry-run", action="store_true",
                      help="Export sequences and write FASTA but do not run BLAST.")
-    return p
+    return parser
+
+
+def _taxonomy_level(counts_path: Path) -> int:
+    """Taxonomic level number parsed from a taxonomy_counts_L<N>_ filename (0 if absent)."""
+    match = re.search(r"_L(\d+)_", counts_path.name)
+    return int(match.group(1)) if match else 0
 
 
 def _derive_counts_tsv(paths, marker: str) -> Optional[Path]:
@@ -532,15 +539,11 @@ def _derive_counts_tsv(paths, marker: str) -> Optional[Path]:
     Find the taxonomy count TSV for a marker, picking the deepest taxonomic
     level available (e.g. L7 over L6). Returns None if none exist yet.
     """
-    import re
     tax_dir = paths.engine_taxonomy_results_dir(marker, "all")
-    hits = sorted(tax_dir.glob(f"taxonomy_counts_L*_{marker}.tsv"))
-    if not hits:
+    counts_files = sorted(tax_dir.glob(f"taxonomy_counts_L*_{marker}.tsv"))
+    if not counts_files:
         return None
-    def _level(p: Path) -> int:
-        m = re.search(r"_L(\d+)_", p.name)
-        return int(m.group(1)) if m else 0
-    return max(hits, key=_level)
+    return max(counts_files, key=_taxonomy_level)
 
 
 def main(argv: Optional[List[str]] = None) -> int:

@@ -264,7 +264,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         if any(p.sample_id.startswith(c) for c in control_prefixes))
         log.info("[%s] %d sample pairs (%d controls)", marker, len(pairs), n_control)
 
-        out_path = paths.manifest_tsv(marker)
+        out_path = paths.engine_manifest_tsv(marker)
         if args.dry_run:
             log.info("[%s] DRY RUN — would write %s", marker, out_path)
             continue

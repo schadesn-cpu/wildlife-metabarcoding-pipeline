@@ -345,6 +345,21 @@ def resolve_taxids(taxids: List[str]) -> Dict[str, str]:
 # Result parsing and conflict detection
 # ---------------------------------------------------------------------------
 
+def _flag_conflict(row, conflict_terms: List[str], min_pident: float) -> Tuple[bool, str]:
+    """
+    Return (is_conflict, reason) for one BLAST hit row. Low identity is reported
+    but is not itself a conflict; a hit whose name contains an expected-target
+    term is flagged as a conflict.
+    """
+    name = str(row["species_name"]).lower()
+    if row["pident"] < min_pident:
+        return False, f"Low identity ({row['pident']:.1f}% < {min_pident}%)"
+    for term in conflict_terms:
+        if term in name:
+            return True, f"BLAST hit '{row['species_name']}' conflicts with expected target taxa"
+    return False, ""
+
+
 def parse_blast_results(
     blast_path: Path,
     taxid_names: Dict[str, str],
@@ -381,18 +396,11 @@ def parse_blast_results(
     # Detect conflicts
     conflict_lower = [c.lower() for c in conflict_taxa]
 
-    def check_conflict(row):
-        name = str(row["species_name"]).lower()
-        if row["pident"] < min_pident:
-            return False, f"Low identity ({row['pident']:.1f}% < {min_pident}%)"
-        for ct in conflict_lower:
-            if ct in name:
-                return True, f"BLAST hit '{row['species_name']}' conflicts with expected target taxa"
-        return False, ""
-
-    conflicts = df.apply(check_conflict, axis=1)
-    df["conflict"]        = [c[0] for c in conflicts]
-    df["conflict_reason"] = [c[1] for c in conflicts]
+    conflicts = df.apply(
+        lambda row: _flag_conflict(row, conflict_lower, min_pident), axis=1
+    )
+    df["conflict"]        = [is_conflict for is_conflict, _ in conflicts]
+    df["conflict_reason"] = [reason for _, reason in conflicts]
 
     return df
 
@@ -539,52 +547,52 @@ def write_report(
 # ---------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         prog="blast_qc.py",
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    req = p.add_argument_group("inputs (derived from --marker + config if omitted)")
-    req.add_argument("--marker",    required=True,
+    inputs_grp = parser.add_argument_group("inputs (derived from --marker + config if omitted)")
+    inputs_grp.add_argument("--marker",    required=True,
                      help="Marker name (e.g. MiFish, cytb). Drives derived paths and config.")
-    req.add_argument("--config",    default=None,
+    inputs_grp.add_argument("--config",    default=None,
                      help="Path to pipeline_config.yml.")
-    req.add_argument("--taxonomy",  default=None, type=Path,
+    inputs_grp.add_argument("--taxonomy",  default=None, type=Path,
                      help="Exported taxonomy TSV (Feature ID, Taxon, Confidence). Derived if omitted.")
-    req.add_argument("--rep-seqs",  default=None, type=Path,
+    inputs_grp.add_argument("--rep-seqs",  default=None, type=Path,
                      help="Exported rep-seqs FASTA (dna-sequences.fasta). Derived if omitted.")
-    req.add_argument("--outdir",    default=None, type=Path,
+    inputs_grp.add_argument("--outdir",    default=None, type=Path,
                      help="Output directory. Default: results/<marker>/all/blast/")
 
-    blast = p.add_argument_group("BLAST options (--blast-db from analyses.blast.db, or --remote)")
-    blast.add_argument("--blast-db", default=None,
+    blast_grp = parser.add_argument_group("BLAST options (--blast-db from analyses.blast.db, or --remote)")
+    blast_grp.add_argument("--blast-db", default=None,
                        help="Path to local BLAST nt database. Default: analyses.blast.db.")
-    blast.add_argument("--remote",   action="store_true", default=False,
+    blast_grp.add_argument("--remote",   action="store_true", default=False,
                        help="Use NCBI remote BLAST instead of a local database (slower).")
-    blast.add_argument("--num-threads", type=int, default=None,
+    blast_grp.add_argument("--num-threads", type=int, default=None,
                        help="BLAST threads (local only). Default: 4 (config: blast.num_threads).")
-    blast.add_argument("--max-target-seqs", type=int, default=None,
+    blast_grp.add_argument("--max-target-seqs", type=int, default=None,
                        help="Max BLAST hits per ASV. Default: 5 (config: qc.max_target_seqs).")
-    blast.add_argument("--min-pident", type=float, default=None,
+    blast_grp.add_argument("--min-pident", type=float, default=None,
                        help="Minimum BLAST identity (%%) to call a conflict. Default: 95 (config: qc.min_pident).")
 
-    filt = p.add_argument_group("filter options (default from analyses.blast.qc)")
-    filt.add_argument("--target-rank",    default=None, choices=RANK_ORDER,
+    filter_grp = parser.add_argument_group("filter options (default from analyses.blast.qc)")
+    filter_grp.add_argument("--target-rank",    default=None, choices=RANK_ORDER,
                       help="ASVs not classified to this rank are BLASTed. Default: order.")
-    filt.add_argument("--min-confidence", type=float, default=None,
+    filter_grp.add_argument("--min-confidence", type=float, default=None,
                       help="ASVs below this classifier confidence are BLASTed. Default: 0.80.")
-    filt.add_argument("--conflict-taxa",  nargs="+", default=None,
+    filter_grp.add_argument("--conflict-taxa",  nargs="+", default=None,
                       help="Taxa that signal a conflict (host/contaminant/off-target). "
                            "Default: analyses.blast.qc.conflict_taxa from config.")
-    filt.add_argument("--max-asvs",       type=int, default=None,
+    filter_grp.add_argument("--max-asvs",       type=int, default=None,
                       help="Maximum ASVs to BLAST (safety limit). Default: 200 (config: qc.max_asvs).")
 
-    util = p.add_argument_group("utility")
-    util.add_argument("--skip-blast", action="store_true", default=False,
+    util_grp = parser.add_argument_group("utility")
+    util_grp.add_argument("--skip-blast", action="store_true", default=False,
                       help="Skip BLAST step — just identify and report unresolved ASVs.")
-    util.add_argument("--dry-run",    action="store_true", default=False,
+    util_grp.add_argument("--dry-run",    action="store_true", default=False,
                       help="Print planned actions without running BLAST or writing files.")
-    return p
+    return parser
 
 
 def main(argv=None) -> int:

@@ -636,9 +636,9 @@ def infer_level_from_path(path: Path) -> Optional[int]:
     Try to extract the taxonomic level N from a filename like
     'taxonomy_counts_L7_cytb.tsv'. Returns None if not found.
     """
-    m = re.search(r"_L(\d+)_", path.name)
-    if m:
-        return int(m.group(1))
+    match = re.search(r"_L(\d+)_", path.name)
+    if match:
+        return int(match.group(1))
     return None
 
 
@@ -829,7 +829,7 @@ def build_parser() -> argparse.ArgumentParser:
     Filter thresholds have sensible defaults matching Zeb Antonioli's
     recommended approach for blood meal data.
     """
-    p = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         prog="presence_absence.py",
         description=(
             "Convert taxonomy count table to presence/absence and compute "
@@ -840,32 +840,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # Inputs (derived from --marker + config when omitted)
-    p.add_argument(
+    parser.add_argument(
         "--marker", required=True,
         help="Marker name (e.g. cytb, MiFish). Drives derived paths and config.",
     )
-    p.add_argument(
+    parser.add_argument(
         "--config", default=None,
         help="Path to pipeline_config.yml.",
     )
-    p.add_argument(
+    parser.add_argument(
         "--counts", default=None, type=Path,
         help=(
             "Taxonomy count TSV from taxonomy_table.py (e.g. taxonomy_counts_L7_cytb.tsv). "
             "Derived from --marker (deepest available level) if omitted."
         ),
     )
-    p.add_argument(
+    parser.add_argument(
         "--outdir", default=None, type=Path,
         help="Output directory. Default: results/<marker>/all/presence_absence/",
     )
 
     # Metadata / grouping (optional but must be used together)
-    p.add_argument(
+    parser.add_argument(
         "--metadata", default=None, type=Path,
         help="QIIME2-format metadata TSV. Derived from --marker if omitted; required for --group-by.",
     )
-    p.add_argument(
+    parser.add_argument(
         "--group-by", default=None,
         help=(
             "Metadata column for group-level detection summaries and grouped barplots. "
@@ -874,15 +874,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # Filter thresholds (None → analyses.presence_absence config → built-in default)
-    p.add_argument(
+    parser.add_argument(
         "--min-sample-reads", type=int, default=None, metavar="N",
         help="Drop samples with fewer than N total reads before conversion. Default: 500",
     )
-    p.add_argument(
+    parser.add_argument(
         "--min-taxon-reads", type=int, default=None, metavar="N",
         help="Drop taxa with fewer than N reads across the whole dataset. Default: 50",
     )
-    p.add_argument(
+    parser.add_argument(
         "--min-relabund", type=float, default=None, metavar="F",
         help=(
             "Within each sample, zero out taxa whose relative read abundance is below F "
@@ -891,11 +891,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # Plot options
-    p.add_argument(
+    parser.add_argument(
         "--top-n", type=int, default=None, metavar="N",
         help="Maximum number of taxa to show in barplots. Default: 20",
     )
-    p.add_argument(
+    parser.add_argument(
         "--sample-label", default=None, metavar="WORD",
         help=(
             "Unit word used in summary text and figure subtitles "
@@ -904,16 +904,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # Execution flags
-    p.add_argument(
+    parser.add_argument(
         "--force", action="store_true", default=False,
         help="Overwrite existing outputs without prompting.",
     )
-    p.add_argument(
+    parser.add_argument(
         "--dry-run", action="store_true", default=False,
         help="Print planned actions without writing any files.",
     )
 
-    return p
+    return parser
 
 
 def main(argv=None) -> int:
@@ -1024,14 +1024,11 @@ def _derive_counts_tsv(paths, marker: str) -> Optional[Path]:
     level available (e.g. L7 over L6). Returns None if none exist yet.
     """
     tax_dir = paths.engine_taxonomy_results_dir(marker, "all")
-    hits = sorted(tax_dir.glob(f"taxonomy_counts_L*_{marker}.tsv"))
-    if not hits:
+    counts_files = sorted(tax_dir.glob(f"taxonomy_counts_L*_{marker}.tsv"))
+    if not counts_files:
         return None
-    # Deepest level = highest L number in the filename.
-    def _level(p: Path) -> int:
-        m = re.search(r"_L(\d+)_", p.name)
-        return int(m.group(1)) if m else 0
-    return max(hits, key=_level)
+    # Deepest level = highest L number in the filename (0 if a name has no _L#_).
+    return max(counts_files, key=lambda path: infer_level_from_path(path) or 0)
 
 
 if __name__ == "__main__":

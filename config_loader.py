@@ -210,14 +210,13 @@ def _coerce(val: str) -> Any:
         return False
     if val.lower() in ("null", "~", ""):
         return None
-    try:
-        return int(val)
-    except ValueError:
-        pass
-    try:
-        return float(val)
-    except ValueError:
-        pass
+    # Probe int then float; a ValueError just means "not that type", so fall
+    # through to the next. Whatever is left is returned as a trimmed string.
+    for converter in (int, float):
+        try:
+            return converter(val)
+        except ValueError:
+            continue
     return val.strip('"\'')
 
 

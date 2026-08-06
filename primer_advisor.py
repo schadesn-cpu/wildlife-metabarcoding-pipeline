@@ -212,6 +212,7 @@ def get_sample_reads(reads_dir: Path, marker: str,
     _ctrl = tuple(pfx.lower() for pfx in control_prefixes)
     r1_seqs: List[str] = []
     r2_seqs: List[str] = []
+    n_unreadable = 0
 
     for f in sorted(marker_dir.iterdir()):
         if f.name.startswith(".") or any(f.name.lower().startswith(p) for p in _ctrl):
@@ -225,8 +226,10 @@ def get_sample_reads(reads_dir: Path, marker: str,
                             r1_seqs.append(line.strip())
                         if len(r1_seqs) >= n:
                             break
-            except Exception:
-                pass
+            except OSError:
+                # Corrupt/unreadable gzip — count it so a bad file can't quietly
+                # shrink the sample the primer estimate is built from.
+                n_unreadable += 1
             if len(r1_seqs) >= n:
                 break
 
@@ -242,10 +245,14 @@ def get_sample_reads(reads_dir: Path, marker: str,
                             r2_seqs.append(line.strip())
                         if len(r2_seqs) >= n:
                             break
-            except Exception:
-                pass
+            except OSError:
+                n_unreadable += 1
             if len(r2_seqs) >= n:
                 break
+
+    if n_unreadable:
+        print(f"warning: {n_unreadable} read file(s) for {marker} could not be "
+              f"opened and were skipped", file=sys.stderr)
 
     return r1_seqs[:n], r2_seqs[:n]
 

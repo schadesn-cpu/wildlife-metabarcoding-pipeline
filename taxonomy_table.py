@@ -326,6 +326,26 @@ def apply_taxonomy_filter(
 # Genus label parsing
 # ---------------------------------------------------------------------------
 
+def _clean_taxon_part(part: str, do_strip: bool) -> str:
+    """Strip QIIME2 rank prefixes (e.g. 'g__') and surrounding whitespace/underscores."""
+    if do_strip:
+        part = re.sub(r"^[a-z]__", "", part)
+    return part.strip().strip("_")
+
+
+def _truncate_taxon(taxon: str, sep: str, do_strip: bool, level: int) -> str:
+    """Truncate a full taxonomy string to the requested level, padding with 'Unclassified'."""
+    if pd.isna(taxon) or not str(taxon).strip():
+        return "Unclassified"
+    taxon_str = str(taxon).strip()
+    if do_strip:
+        taxon_str = re.sub(r"[a-z]__", "", taxon_str)
+    parts = [part.strip() for part in taxon_str.split(sep)][:level]
+    while len(parts) < level:
+        parts.append("Unclassified")
+    return sep.join(parts)
+
+
 def clean_taxon_label(taxon: str, level: int, cfg: dict) -> Optional[str]:
     """
     Parse a full taxonomy string and return a clean display label at `level`.
@@ -342,16 +362,9 @@ def clean_taxon_label(taxon: str, level: int, cfg: dict) -> Optional[str]:
     if pd.isna(taxon) or str(taxon).strip().lower() in ("", "unassigned", "no blast hit"):
         return None
 
-    t = str(taxon).strip()
-    parts = [p.strip() for p in t.split(sep)]
-
-    def clean(s: str) -> str:
-        """Strip QIIME2 rank prefixes (e.g. 'g__') and surrounding whitespace/underscores."""
-        if do_strip:
-            s = re.sub(r"^[a-z]__", "", s)
-        return s.strip().strip("_")
-
-    cleaned = [clean(p) for p in parts]
+    taxon_str = str(taxon).strip()
+    parts = [part.strip() for part in taxon_str.split(sep)]
+    cleaned = [_clean_taxon_part(part, do_strip) for part in parts]
 
     # At the requested level, try to find the most specific non-empty name
     target = cleaned[level - 1] if len(cleaned) >= level else ""
@@ -364,10 +377,10 @@ def clean_taxon_label(taxon: str, level: int, cfg: dict) -> Optional[str]:
                   .replace("_", " "))
         # Treat "uncultured" genus as unclassified — go up to family
         if target.lower() == "uncultured":
-            f = cleaned[level - 2] if len(cleaned) >= level - 1 else ""
-            if f and f not in ("", "__"):
-                f = f.replace("_", " ")
-                return f"uncl. {f}"
+            family_name = cleaned[level - 2] if len(cleaned) >= level - 1 else ""
+            if family_name and family_name not in ("", "__"):
+                family_name = family_name.replace("_", " ")
+                return f"uncl. {family_name}"
             return None
         return target
 
@@ -428,19 +441,9 @@ def collapse_to_level(
         sep = cfg["separator"]
         do_strip = cfg.get("prefix_strip", False)
 
-        def truncate(taxon: str) -> str:
-            """Truncate a full taxonomy string to the requested level, padding with 'Unclassified'."""
-            if pd.isna(taxon) or not str(taxon).strip():
-                return "Unclassified"
-            t = str(taxon).strip()
-            if do_strip:
-                t = re.sub(r"[a-z]__", "", t)
-            parts = [p.strip() for p in t.split(sep)][:level]
-            while len(parts) < level:
-                parts.append("Unclassified")
-            return sep.join(parts)
-
-        label_series = tax_idx.reindex(table.index).apply(truncate)
+        label_series = tax_idx.reindex(table.index).apply(
+            lambda taxon: _truncate_taxon(taxon, sep, do_strip, level)
+        )
 
     collapsed = table.copy()
     collapsed.index = label_series.values
@@ -491,6 +494,25 @@ def top_n_table(relabund: pd.DataFrame, n: int) -> pd.DataFrame:
 # Per-ASV summary
 # ---------------------------------------------------------------------------
 
+def _parse_taxon_row(taxon, sep: str, do_strip: bool, level_names: List[str]) -> List[str]:
+    """
+    Split a taxonomy string into a fixed-length list aligned to level_names.
+
+    Strips rank prefixes if do_strip is set, splits on the configured separator,
+    pads short strings with 'Unclassified', and replaces any empty parts with
+    'Unclassified'.
+    """
+    if pd.isna(taxon) or str(taxon).strip().lower() in ("", "unassigned"):
+        return ["Unclassified"] * len(level_names)
+    taxon_str = str(taxon).strip()
+    if do_strip:
+        taxon_str = re.sub(r"[a-z]__", "", taxon_str)
+    parts = [part.strip() for part in taxon_str.split(sep)][:len(level_names)]
+    while len(parts) < len(level_names):
+        parts.append("Unclassified")
+    return [part or "Unclassified" for part in parts]
+
+
 def build_asv_summary(
     table: pd.DataFrame,
     tax_df: pd.DataFrame,
@@ -505,30 +527,13 @@ def build_asv_summary(
     do_strip = cfg.get("prefix_strip", False)
     level_names = cfg["level_names"]
 
-    def parse_row(taxon):
-        """
-Split a taxonomy string into a fixed-length list aligned to level_names.
-
-        Strips rank prefixes if do_strip is set, splits on the configured
-        separator, pads short strings with 'Unclassified', and replaces any
-        empty parts with 'Unclassified'.
-        """
-        if pd.isna(taxon) or str(taxon).strip().lower() in ("", "unassigned"):
-            return ["Unclassified"] * len(level_names)
-        t = str(taxon).strip()
-        if do_strip:
-            t = re.sub(r"[a-z]__", "", t)
-        parts = [p.strip() for p in t.split(sep)][:len(level_names)]
-        while len(parts) < len(level_names):
-            parts.append("Unclassified")
-        return [p or "Unclassified" for p in parts]
-
     totals   = table.sum(axis=1).rename("total_reads")
     presence = (table > 0).sum(axis=1).rename("samples_present")
 
     level_df = pd.DataFrame(
-        [parse_row(tax_df.set_index("Feature ID")["Taxon"].get(f, ""))
-         for f in table.index],
+        [_parse_taxon_row(tax_df.set_index("Feature ID")["Taxon"].get(feature_id, ""),
+                          sep, do_strip, level_names)
+         for feature_id in table.index],
         index=table.index,
         columns=level_names,
     )
@@ -718,7 +723,7 @@ Build and return the argument parser for 07_taxonomy_table.py.
     prefix stripping are applied automatically; all can be overridden.
     See module docstring for full rationale and usage examples.
     """
-    p = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         prog="taxonomy_table.py",
         description=(
             "Export QIIME 2 taxonomy to TSV tables for barplotting.\n"
@@ -727,51 +732,51 @@ Build and return the argument parser for 07_taxonomy_table.py.
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--taxonomy", default=None, type=Path,
+    parser.add_argument("--taxonomy", default=None, type=Path,
                    help="FeatureData[Taxonomy] QZA. Derived from --marker if omitted.")
-    p.add_argument("--table", default=None, type=Path,
+    parser.add_argument("--table", default=None, type=Path,
                    help="FeatureTable[Frequency] QZA (unrarefied). Derived from --marker if omitted.")
-    p.add_argument("--marker", required=True, choices=list(MARKER_CONFIG.keys()),
+    parser.add_argument("--marker", required=True, choices=list(MARKER_CONFIG.keys()),
                    help="Marker gene — controls taxonomy depth and auto-filter defaults.")
-    p.add_argument("--config", default=None, help="Path to pipeline_config.yml.")
-    p.add_argument("--outdir", default=None, type=Path,
+    parser.add_argument("--config", default=None, help="Path to pipeline_config.yml.")
+    parser.add_argument("--outdir", default=None, type=Path,
                    help="Output directory. Default: results/<marker>/all/taxonomy/ from config.")
-    p.add_argument("--level", type=int, default=None,
+    parser.add_argument("--level", type=int, default=None,
                    help=(
                        "Taxonomic level to collapse to (1=Kingdom, N=Species). "
                        "Defaults: 16S/18S/ITS→genus, MiFish/cytb/COI→species."
                    ))
-    p.add_argument("--top-n", type=int, default=30,
+    parser.add_argument("--top-n", type=int, default=30,
                    help="Top-N taxa to include in the summary table. Default: 30")
-    p.add_argument("--include", default="",
+    parser.add_argument("--include", default="",
                    help=(
                        "Comma-separated taxon strings to keep. "
                        "Overrides the marker default. "
                        "Example: --include Metazoa,Chordata"
                    ))
-    p.add_argument("--exclude", default="",
+    parser.add_argument("--exclude", default="",
                    help=(
                        "Comma-separated taxon strings to remove. "
                        "Overrides the marker default. "
                        "Example: --exclude mitochondria,chloroplast"
                    ))
-    p.add_argument("--no-auto-filter", action="store_true",
+    parser.add_argument("--no-auto-filter", action="store_true",
                    help=(
                        "Disable automatic marker-specific filters entirely. "
                        "Use if you want raw unfiltered output or are applying "
                        "custom --include/--exclude."
                    ))
-    p.add_argument("--min-freq", type=int, default=1,
+    parser.add_argument("--min-freq", type=int, default=1,
                    help="Min total reads to keep a feature (ASV-level). Default: 1")
-    p.add_argument("--min-sample-reads", type=int, default=100,
+    parser.add_argument("--min-sample-reads", type=int, default=100,
                    help=(
                        "Min classified reads to retain a sample in the "
                        "relabund/barplot table. Samples below this threshold are "
                        "dropped from the output (but noted in log). Default: 100"
                    ))
-    p.add_argument("--dry-run", action="store_true",
+    parser.add_argument("--dry-run", action="store_true",
                    help="Print planned actions without writing files.")
-    return p
+    return parser
 
 
 def _resolve_taxonomy_source(paths, cfg, marker: str, explicit: Optional[Path]):
