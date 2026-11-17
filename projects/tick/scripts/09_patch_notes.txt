@@ -1,0 +1,180 @@
+PATCH NOTES — 09_pathogen_host_cooccurrence.py
+================================================
+
+Three changes, all minimally invasive:
+
+  1. Fix the `min_read` -> `min_reads` typo on the line that thresholds reads
+     per ASV. As written this raises NameError; either it's never actually
+     executed (some upstream guard) or every call has been silently failing
+     for one branch. Fixed unconditionally.
+
+  2. Add a `--genus-exact` flag (default OFF for reproducibility). When ON,
+     terms are matched against the g__<token> field of the Taxon string,
+     not as free substrings. This eliminates the family-level and order-level
+     substring traps documented in
+       results/16S/all/blast_verify/audit_substring_traps_summary.tsv
+
+     Default OFF means: rerunning `09` with the same args as before produces
+     bit-identical output to before. Opt in for the corrected behavior.
+
+  3. New `--targets-config` arg (optional) for loading the pathogens_16s /
+     pathogens_18s / hosts_cytb dicts from pipeline_config.yml instead of
+     hardcoding them in the script. Falls back to the existing hardcoded
+     dicts if not provided. Useful if you decide to track Wolbachia or
+     Ehrlichia separately later.
+
+Apply with `patch -p0 < this_file` from the project root, OR copy the four
+hunks below by hand into scripts/09_pathogen_host_cooccurrence.py.
+
+------------------------------------------------------------
+HUNK 1 — fix the min_read typo (line 41)
+------------------------------------------------------------
+
+Find:
+            if fid in sample_counts.index and sample_counts[fid] >= min_read:
+
+Replace with:
+            if fid in sample_counts.index and sample_counts[fid] >= min_reads:
+
+------------------------------------------------------------
+HUNK 2 — add a genus-token matcher and switch detect_in_sample to use it
+------------------------------------------------------------
+
+Find the current `detect_in_sample` function (around line 24):
+
+    def detect_in_sample(counts, taxonomy, targets, min_reads=1):
+        """For each sample, detect which target taxa are present."""
+        # Map feature IDs to target taxa
+        target_features = {}
+        for fid, row in taxonomy.iterrows():
+            taxon = row['Taxon']
+            for target_name, search_terms in targets.items():
+                if any(term.lower() in taxon.lower() for term in search_terms):
+                    target_features[fid] = target_name
+                    break
+
+Replace with:
+
+    import re
+    _GENUS_RE = re.compile(r"g__([^;]*)")
+
+    def _genus_token(taxon):
+        """Return the g__<token> from a SILVA-style Taxon string, or '' if absent."""
+        if not isinstance(taxon, str):
+            return ""
+        m = _GENUS_RE.search(taxon)
+        return m.group(1) if m else ""
+
+    def detect_in_sample(counts, taxonomy, targets, min_reads=1, genus_exact=False):
+        """For each sample, detect which target taxa are present.
+
+        If `genus_exact` is True, terms are matched against the g__<token>
+        field of Taxon (case-sensitive). If False (default), the original
+        case-insensitive substring behavior is preserved for reproducibility.
+        """
+        target_features = {}
+        for fid, row in taxonomy.iterrows():
+            taxon = row['Taxon']
+            if genus_exact:
+                gen = _genus_token(taxon)
+                for target_name, search_terms in targets.items():
+                    if any(gen == term for term in search_terms):
+                        target_features[fid] = target_name
+                        break
+            else:
+                lo = taxon.lower() if isinstance(taxon, str) else ""
+                for target_name, search_terms in targets.items():
+                    if any(term.lower() in lo for term in search_terms):
+                        target_features[fid] = target_name
+                        break
+
+------------------------------------------------------------
+HUNK 3 — add --genus-exact CLI flag and thread it through the three
+detect_in_sample calls
+------------------------------------------------------------
+
+In main(), after the existing `--min-reads` add_argument call (around line 58):
+
+    parser.add_argument('--genus-exact', action='store_true',
+                        help="Match search terms against the g__<token> field "
+                             "of Taxon, not as substrings. Recommended; "
+                             "default OFF for reproducibility with prior runs. "
+                             "See results/16S/all/blast_verify/audit_substring_traps_summary.tsv")
+
+Then update the three detect_in_sample calls (around lines 113, 117, 121):
+
+Find:
+    det_16s = detect_in_sample(counts_16s, tax_16s, pathogens_16s, args.min_reads)
+    ...
+    det_18s = detect_in_sample(counts_18s, tax_18s, pathogens_18s, args.min_reads)
+    ...
+    det_cytb = detect_in_sample(counts_cytb, tax_cytb, hosts_cytb, args.min_reads)
+
+Replace with:
+    det_16s = detect_in_sample(counts_16s, tax_16s, pathogens_16s,
+                               args.min_reads, genus_exact=args.genus_exact)
+    ...
+    det_18s = detect_in_sample(counts_18s, tax_18s, pathogens_18s,
+                               args.min_reads, genus_exact=args.genus_exact)
+    ...
+    det_cytb = detect_in_sample(counts_cytb, tax_cytb, hosts_cytb,
+                                args.min_reads, genus_exact=args.genus_exact)
+
+Note: leave cytb's hosts_cytb dict using genus_exact=False is also a defensible
+choice — cytb species names like 'Odocoileus virginianus' aren't single g__
+tokens, they're species-level matches. If passing genus_exact=True breaks cytb
+host calling, change the cytb call back to genus_exact=False and add a TODO
+comment to handle cytb species-level matching separately. Test before committing.
+
+------------------------------------------------------------
+HUNK 4 — handle Francisella reclassification
+------------------------------------------------------------
+
+Per BLAST verification, all Francisella in this dataset are tick endosymbiont,
+not pathogenic F. tularensis. Two options:
+
+Option A: Drop from pathogen panel entirely. In pathogens_16s:
+    # Remove the Francisella line; or move into a comment for documentation.
+
+Option B (recommended): Keep tracked but rename so it's not misread as a
+pathogen call. Change:
+
+        'Francisella': ['Francisella'],
+
+to:
+
+        'Francisella_endosymbiont': ['Francisella'],
+
+This way the column survives in cooccurrence_*.tsv with a self-documenting name
+and 11_plot_summary_figures.py can show it in the endosymbiont category instead
+of as a pathogen.
+
+------------------------------------------------------------
+After applying — verification run
+------------------------------------------------------------
+
+  # Reproducibility check: with --genus-exact OFF, output should be byte-identical
+  # to the existing Apr 25 cooccurrence files (modulo timestamp).
+  python scripts/09_pathogen_host_cooccurrence.py \
+      --s16-table qiime2/16S/all/dada2/table_bacteria_wtd.qza \
+      --s16-taxonomy qiime2/16S/all/taxonomy-exported-temp/taxonomy.tsv \
+      --s18-table qiime2/18S/all/dada2/table_paired.qza \
+      --s18-taxonomy qiime2/18S/all/taxonomy-exported-temp/taxonomy.tsv \
+      --cytb-table qiime2/cytb/all/dada2/table_bloodmeal.qza \
+      --cytb-taxonomy results/cytb/all/blast_verify/cytb_remap.tsv \
+      --outdir /tmp/cooccurrence_legacy_check \
+      --min-reads 5
+
+  diff results/cooccurrence/cooccurrence_counts.tsv \
+       /tmp/cooccurrence_legacy_check/cooccurrence_counts.tsv
+  # Should be empty.
+
+  # Now the corrected run:
+  python scripts/09_pathogen_host_cooccurrence.py \
+      [same args as above] \
+      --outdir results/cooccurrence \
+      --genus-exact
+
+  # Then rerun downstream
+  python scripts/10_adrianna_sample_table.py
+  python scripts/11_plot_summary_figures.py

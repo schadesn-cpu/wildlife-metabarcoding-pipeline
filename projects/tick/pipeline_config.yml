@@ -1,0 +1,137 @@
+# ============================================================
+#  pipeline_config.yml — Tick Bloodmeal + Microbiome Study
+#  (with 18S added — 2026-04-19)
+# ============================================================
+
+project:
+  name: "tick_bloodmeal_microbiome"
+  root: "/home/users/sne24/meedlab/tick_project"
+  email: "sne24@unh.edu"
+
+samples:
+  id_regex: "^([^.]+)"
+  control_prefixes:
+    - "NTC-"
+    - "NTCH"
+    - "NEG-"
+    - "BLK-"
+    - "POS-"
+    - "POSH"
+    - "XB-"
+    - "XBG"
+    - "XBH"
+    - "EXTRACTIONBLANK"
+    - "PC-WELL"
+    - "XB-OR-NTC"
+
+active_markers:
+  - "16S"
+  - "18S"
+  - "cytb"
+
+markers:
+  16S:
+    description:       "Bacterial 16S rRNA V4 (515F/universal-reverse, SILVA 138)"
+    classifier:        "classifiers/silva-138-99-nb-classifier-515-806.qza"
+    rarefaction_depth: 8000
+    phylo:             true
+    pcoa_metrics:
+      - "bray_curtis"
+      - "jaccard"
+      - "weighted_unifrac"
+      - "unweighted_unifrac"
+    alpha_metrics:
+      - "observed_features"
+      - "shannon"
+      - "evenness"
+      - "faith_pd"
+
+  18S:
+    description:       "Eukaryote 18S V4 (515F/universal-reverse, PR2 v5)"
+    classifier:        "classifiers/pr2-18S-classifier-trimmed.qza"
+    rarefaction_depth: 1000
+    phylo:             false
+    pcoa_metrics:
+      - "bray_curtis"
+      - "jaccard"
+    alpha_metrics:
+      - "observed_features"
+      - "shannon"
+      - "evenness"
+
+  cytb:
+    description:       "Vertebrate cytochrome b (NCBI vertebrata classifier)"
+    classifier:        "classifiers/ncbi-cytb-vertebrata-classifier.qza"
+    rarefaction_depth: 200
+    phylo:             false
+    pcoa_metrics:
+      - "bray_curtis"
+      - "jaccard"
+    alpha_metrics:
+      - "observed_features"
+      - "shannon"
+      - "evenness"
+
+metadata:
+  16S:
+    all: "reads_staged/16S_metadata.tsv"
+    cod: "reads_staged/16S_metadata.tsv"
+  18S:
+    all: "reads_staged/16S_metadata.tsv"
+    cod: "reads_staged/16S_metadata.tsv"
+  cytb:
+    all: "reads_staged/cytb_metadata.tsv"
+    cod: "reads_staged/cytb_metadata.tsv"
+
+groups:
+  primary:
+    column: "sheet__State"
+    order:
+      - "NH"
+      - "VT"
+      - "ME"
+    dvt_order:
+      - "NH"
+      - "VT"
+  secondary:
+    column: "sheet__Host Category"
+    order:
+      - "Adult"
+      - "Fawn"
+      - "Juvenile"
+      - "Infant"
+  seasonal:
+    column: "sheet__Date Collected"
+    order: []
+
+diversity_dirs:
+  16S:
+    DvT:    "qiime2/16S/diversity/r8000_DvT/core_metrics"
+    season: "qiime2/16S/diversity/r8000_season/core_metrics"
+  18S:
+    DvT:    "qiime2/18S/diversity/r1000_DvT/core_metrics"
+    season: "qiime2/18S/diversity/r1000_season/core_metrics"
+  cytb:
+    DvT:    "qiime2/cytb/diversity/r200_DvT/core_metrics"
+    season: "qiime2/cytb/diversity/r200_season/core_metrics"
+
+figures:
+  palette: "wong"
+  annotated_dir:  "results/figures_annotated"
+  manuscript_dir: "results/figures_manuscript"
+
+ncbi:
+  email:   "sne24@unh.edu"
+  api_key: ""
+
+slurm:
+  partition: "shared"
+  cpus:      16
+  mem:       "64G"
+  time:      "08:00:00"
+  mail_type: "END,FAIL"
+
+taxonomy_relabund:
+  "16S":  "results/16S/all/taxonomy/taxonomy_relabund_L6_16S.tsv"
+  "18S":  "results/18S/all/taxonomy/taxonomy_relabund_L6_18S.tsv"
+  "cytb": "results/cytb/all/taxonomy_cleaned/taxonomy_relabund_L7_cytb_cleaned.tsv"

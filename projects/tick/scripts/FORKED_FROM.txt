@@ -1,0 +1,15 @@
+Forked from: ~/meedlab/loon_project
+Date:        2026-04-19
+Git SHA:     9e791b1
+Git status at fork: M  .gitignore
+D  classifiers/adeno_aviadenovirus_otus.fasta
+D  classifiers/gavia-12S-s.qza
+D  classifiers/gavia-12S-seqs-trimmed.fasta
+D  classifiers/gavia-12S-seqs.fasta
+
+Purpose: tick bloodmeal + microbiome study for Adrianna.
+
+Tick-specific edits made on top of the loon pipeline:
+  - HOST_TAXON_STRINGS in 11_clean_diet_table.py (inverted to keep non-tick)
+  - PREY_LOOKUP replaced with vertebrate-host lookup in 11c_annotate_diet_ecology.py
+  - (add others as they happen)

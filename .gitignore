@@ -28,3 +28,6 @@ file_inventory.csv
 *.iqtree
 *.zip
 *.biom
+
+# withheld collection records (see projects/tick/README.md)
+projects/tick/metadata/
